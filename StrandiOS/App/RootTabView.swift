@@ -32,6 +32,9 @@ struct RootTabView: View {
     /// a no-op). Threaded into each tab's root via `\.scrollToTopSignal`; ScreenScaffold / LiquidTodayView
     /// scroll to their top anchor when their tab's token changes.
     @State private var scrollTop: [Int] = Array(repeating: 0, count: 4)
+    /// Immersive pushed pages such as Coach own their full-height workspace and hide the app-level
+    /// floating bar until they disappear. The environment action below is the single write path.
+    @State private var floatingTabBarHidden = false
     /// Which More-tab groups are expanded (S2). Insights + Body stay open at rest; Data + App collapse to
     /// just their header until tapped. Persisted (#860 item 2): the user's open/closed choice must SURVIVE
     /// leaving and re-entering the More tab (and relaunch), not reset to the seed every visit. Backed by an
@@ -88,14 +91,17 @@ struct RootTabView: View {
                 DragGesture(minimumDistance: 24)
                     .onEnded { v in
                         // Today (tab 0) uses horizontal swipe to change DAYS, so tab-swipe is off there.
-                        guard selectedTab != 0 else { return }
+                        // Immersive pushed pages such as Coach own their horizontal gestures. When
+                        // the floating bar is hidden, never let a drag leak through and change tabs.
+                        guard selectedTab != 0, !floatingTabBarHidden else { return }
                         let dx = v.translation.width, dy = v.translation.height
                         guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
                         let next = min(3, max(0, selectedTab + (dx < 0 ? 1 : -1)))
                         if next != selectedTab {
                             withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = next }
                         }
-                    }
+                    },
+                including: floatingTabBarHidden ? .none : .all
             )
 
             FloatingTabBar(selection: $selectedTab, onReselect: { tag in
@@ -110,6 +116,20 @@ struct RootTabView: View {
                     scrollTop[tag] += 1                // already at root: scroll to the top (#198 follow-up)
                 }
             })
+            // Keep the bar in the hierarchy while an immersive destination is pushed. Removing it
+            // conditionally during the same render pass as a NavigationPath update makes iOS 26
+            // invalidate the push and replace the destination with its yellow warning placeholder.
+            .opacity(floatingTabBarHidden ? 0 : 1)
+            .allowsHitTesting(!floatingTabBarHidden)
+            .accessibilityHidden(floatingTabBarHidden)
+            .animation(StrandMotion.fade, value: floatingTabBarHidden)
+        }
+        .environment(\.setFloatingTabBarHidden) { hidden in
+            // Coach appears as part of a NavigationStack push. Defer this ancestor-state update
+            // until that push has committed so NavigationAuthority is never written twice per frame.
+            DispatchQueue.main.async {
+                floatingTabBarHidden = hidden
+            }
         }
         .task {
             await repo.refresh()
@@ -377,7 +397,12 @@ struct RootTabView: View {
             // bar background keeps the sky edge-to-edge. On the flat (no-sky) screens this is visually
             // identical at rest — the destination's own surfaceBase background shows through the bar.
             .navigationDestination(for: MoreDestination.self) { route in
-                route.destination
+                route.destination(onCloseCoach: {
+                    var currentPath = path.wrappedValue
+                    guard !currentPath.isEmpty else { return }
+                    currentPath.removeLast()
+                    path.wrappedValue = currentPath
+                })
                     .background(StrandPalette.surfaceBase.ignoresSafeArea())
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarBackground(.hidden, for: .navigationBar)
@@ -453,11 +478,12 @@ private enum MoreDestination: Hashable {
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
     case alarms, automations, testCentre, siriShortcuts, settings
 
-    @ViewBuilder var destination: some View {
+    @ViewBuilder
+    func destination(onCloseCoach: (() -> Void)? = nil) -> some View {
         switch self {
         case .insightsHub:     InsightsHubView()
         case .intelligence:    IntelligenceView()
-        case .coach:           CoachView()
+        case .coach:           CoachView(onClose: onCloseCoach)
         case .insights:        InsightsView()
         case .explore:         MetricExplorerView()
         case .compare:         CompareView()
@@ -641,19 +667,7 @@ private struct FloatingTabBar: View {
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
-        .liquidGlass(in: Capsule())
-        // Over the liquid Today the sky ends at ~340pt, so the bar floats on flat opaque surfaceBase —
-        // a blur material has nothing to dissolve and hardens into a solid lozenge (2026-07-02:
-        // "clips into a solid shape"). A faint translucent scrim INSIDE the same Capsule keeps the pill
-        // reading as tinted glass, not a slab, even against dead-flat colour.
-        .background(.white.opacity(0.06), in: Capsule())
-        // Soft top-lit rim instead of one hard hairline, so there's no crisp cut-out edge.
-        .overlay(
-            Capsule().strokeBorder(
-                LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.04)],
-                               startPoint: .top, endPoint: .bottom),
-                lineWidth: 0.75)
-        )
+        .noopLiquidChrome(in: Capsule())
         // Lighter, wider shadow: real elevation without stamping a dark halo on the flat canvas.
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 8)
         .padding(.horizontal, 22)
@@ -687,17 +701,4 @@ private struct FloatingTabBar: View {
 
 }
 
-// MARK: - Liquid Glass (iOS 26) with a Material fallback
-
-private extension View {
-    /// Real iOS 26 Liquid Glass where available; `.ultraThinMaterial` on iOS 17–25 — a clean
-    /// blended degrade so the bar stays modern on new OSes without breaking older ones.
-    @ViewBuilder func liquidGlass(in shape: some Shape) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape)
-        } else {
-            self.background(.ultraThinMaterial, in: shape)
-        }
-    }
-}
 #endif

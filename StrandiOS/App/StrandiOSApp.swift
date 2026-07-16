@@ -224,13 +224,17 @@ private struct iOSRootView: View {
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     @State private var showWhatsNew = false
+    #if DEBUG
+    @State private var demoScreenDismissed = false
+    #endif
 
     var body: some View {
         #if DEBUG
         // DEBUG-only: `--demo-screen <name>` renders one screen full-bleed (gates bypassed) so a
         // seeded simulator build can be screenshotted deterministically for verification + marketing.
         // No-op in Release (whole branch is #if DEBUG) and when the arg is absent.
-        if let demo = DemoScreens.requested {
+        if !demoScreenDismissed,
+           let demo = DemoScreens.requested(onCloseCoach: { demoScreenDismissed = true }) {
             // Inherit the app appearance (set via the Theme picker, or `-theme.appearance light|dark`
             // in the launch arguments) so demo/marketing shots can be taken in either scheme.
             return AnyView(
@@ -311,7 +315,7 @@ private struct iOSRootView: View {
 /// simulator build can be captured deterministically (verification + marketing). Stripped from Release.
 enum DemoScreens {
     /// The screen named by `--demo-screen <name>`, or nil if the arg is absent/unknown.
-    static var requested: AnyView? {
+    static func requested(onCloseCoach: @escaping () -> Void) -> AnyView? {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--demo-screen"), i + 1 < args.count else { return nil }
         switch args[i + 1].lowercased() {
@@ -323,6 +327,7 @@ enum DemoScreens {
         case "workouts": return AnyView(WorkoutsView())
         case "health":   return AnyView(HealthView())
         case "insights": return AnyView(InsightsView())
+        case "coach":    return AnyView(CoachView(onClose: onCloseCoach))
         case "explore":  return AnyView(MetricExplorerView())
         case "compare":  return AnyView(CompareView())
         case "settings": return AnyView(SettingsView())

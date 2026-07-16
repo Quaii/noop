@@ -79,6 +79,62 @@ public extension View {
             .presentationDragIndicator(.visible)
             .presentationDetents(largeFirst ? [.large] : [.medium, .large])
     }
+
+    /// The shared interactive chrome material: native Liquid Glass on iOS 26 and the same
+    /// ultra-thin material fallback on earlier supported iOS versions.
+    @ViewBuilder
+    func noopLiquidGlass<S: Shape>(
+        in shape: S,
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            if let tint {
+                if interactive {
+                    self.glassEffect(.regular.tint(tint).interactive(), in: shape)
+                } else {
+                    self.glassEffect(.regular.tint(tint), in: shape)
+                }
+            } else if interactive {
+                self.glassEffect(.regular.interactive(), in: shape)
+            } else {
+                self.glassEffect(.regular, in: shape)
+            }
+        } else {
+            self
+                .background(.ultraThinMaterial, in: shape)
+                .background(tint ?? .clear, in: shape)
+        }
+    }
+
+    /// The complete floating-chrome finish used by the iOS navigation bar and compact controls.
+    /// The subtle scrim keeps glass visible over flat backgrounds; the top-lit rim prevents it from
+    /// reading as a solid slab.
+    func noopLiquidChrome<S: InsettableShape>(
+        in shape: S,
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        self
+            .background(StrandPalette.onDarkPrimary.opacity(0.06), in: shape)
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            StrandPalette.onDarkPrimary.opacity(0.22),
+                            StrandPalette.onDarkPrimary.opacity(0.04)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
+            )
+            // Liquid Glass captures the completed appearance. Keeping it last makes the scrim
+            // and rim deform with the interactive surface instead of leaving a static outline
+            // behind when the control responds to focus or touch.
+            .noopLiquidGlass(in: shape, tint: tint, interactive: interactive)
+    }
 }
 #endif
 

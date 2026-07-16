@@ -15,6 +15,10 @@ import StrandDesign
 struct CoachView: View {
     @EnvironmentObject var coach: AICoachEngine
 
+    /// The iOS shell owns its bound NavigationPath, so immersive Coach presentations can supply an
+    /// explicit pop action instead of relying on a nested environment dismissal.
+    private let onClose: (() -> Void)?
+
     /// Draft text in the composer (the question being typed).
     @State private var draft: String = ""
     /// Pending key text in the setup card (never persisted here, handed to `setKey`).
@@ -41,12 +45,37 @@ struct CoachView: View {
         String(localized: "Why am I run down?"),
     ]
 
+    init(onClose: (() -> Void)? = nil) {
+        self.onClose = onClose
+    }
+
     var body: some View {
+        #if os(iOS)
+        if coach.isConfigured {
+            CoachIOSChatView(coach: coach, onClose: onClose)
+        } else {
+            setupScreen
+        }
+        #else
+        macScreen
+        #endif
+    }
+
+    private var setupScreen: some View {
         ScreenScaffold(title: "Coach",
                        subtitle: "Ask about your charge, effort, rest and workouts, grounded in your own numbers.",
                        // Liquid finish: the same full-bleed day-of-sky backdrop Today + the other liquid
                        // tabs carry, so Coach sits in one atmosphere. Static + non-interactive; the frosted
                        // message/setup cards below sit on the opaque canvas and stay legible.
+                       topBackground: liquidScaffoldSky()) {
+            setupCard
+        }
+    }
+
+    #if os(macOS)
+    private var macScreen: some View {
+        ScreenScaffold(title: "Coach",
+                       subtitle: "Ask about your charge, effort, rest and workouts, grounded in your own numbers.",
                        topBackground: liquidScaffoldSky()) {
             if coach.isConfigured {
                 connectedHeader
@@ -82,6 +111,7 @@ struct CoachView: View {
         }
         .task(id: coach.dataConsent) { await coach.startBriefIfNeeded() }
     }
+    #endif
 
     /// Explicit, revocable permission for the coach to read & send the user's data. Off by default.
     /// A frosted Charge-tinted card so it reads as part of the green Coach world, not a flat panel.

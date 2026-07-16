@@ -332,6 +332,12 @@ final class AICoachEngine: ObservableObject {
         return provider == .custom ? "" : nil
     }
 
+    /// Whether the currently selected provider has enough configuration to fetch its model list.
+    /// This intentionally exposes only readiness, never the stored credential itself.
+    var canRefreshModels: Bool {
+        provider == .custom ? customConnected : resolvedKey != nil
+    }
+
     /// Commit the Custom (local) provider once the user has entered a server URL. Optionally stores a
     /// key first if they pasted one. Pulls the server's live model list so the picker isn't empty.
     func connectCustom() {

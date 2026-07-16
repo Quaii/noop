@@ -46,6 +46,8 @@ public enum NoopButtonMetrics {
     public static let minHitTarget: CGFloat = 44
     /// Pressed scale (spec: subtle 0.97). Reduce-Motion collapses this to 1 (dim only).
     public static let pressedScale: CGFloat = 0.97
+    /// Focus lift for a compact action paired with an expanding input surface.
+    public static let focusedScale: CGFloat = 1.04
     /// Pressed dim — a slight opacity drop, applied in BOTH motion modes.
     public static let pressedOpacity: Double = 0.82
     /// Disabled dim, shared so call sites don't invent their own.
