@@ -15,7 +15,7 @@ import SwiftUI
 
 /// One of the Today screen's Key-Metric tiles. The rawValue is the stable persisted identifier — keep it
 /// byte-identical to the Android `KeyMetric` enum so a backup/restore reads the same layout on either OS.
-enum KeyMetric: String, CaseIterable, Identifiable {
+enum KeyMetric: String, CaseIterable, Identifiable, Hashable {
     case charge
     case effort
     case rest

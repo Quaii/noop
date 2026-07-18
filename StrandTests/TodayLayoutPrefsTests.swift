@@ -67,4 +67,24 @@ final class TodayLayoutPrefsTests: XCTestCase {
             ["hero", "liveSession", "synthesis", "keyMetrics", "workouts", "heartRate", "recoveryVitals", "yourCards"]
         )
     }
+
+    func testMovingSectionDownLandsAfterCrossedTarget() {
+        XCTAssertEqual(
+            TodayLayoutPrefs.moving(.hero, to: .synthesis, in: TodaySection.defaultOrder),
+            [.liveSession, .synthesis, .hero, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards]
+        )
+    }
+
+    func testMovingSectionUpLandsBeforeCrossedTarget() {
+        XCTAssertEqual(
+            TodayLayoutPrefs.moving(.heartRate, to: .synthesis, in: TodaySection.defaultOrder),
+            [.hero, .liveSession, .heartRate, .synthesis, .keyMetrics, .workouts, .recoveryVitals, .yourCards]
+        )
+    }
+
+    func testMovingUnknownOrSameSectionIsANoOp() {
+        let order = TodaySection.defaultOrder
+        XCTAssertEqual(TodayLayoutPrefs.moving(.hero, to: .hero, in: order), order)
+        XCTAssertEqual(TodayLayoutPrefs.moving(.hero, to: .synthesis, in: [.workouts, .synthesis]), [.workouts, .synthesis])
+    }
 }

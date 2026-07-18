@@ -17,7 +17,7 @@ import SwiftUI
 /// One available card in the "Your cards" dashboard. The `rawValue` is the stable persisted identifier,
 /// keep it byte-identical to the Android `DashboardCard` ids so a backup/restore reads the same dashboard
 /// on either OS.
-enum DashboardCard: String, CaseIterable, Identifiable {
+enum DashboardCard: String, CaseIterable, Identifiable, Hashable {
     case hrv
     case restingHr
     case respiratory

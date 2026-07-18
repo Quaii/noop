@@ -52,6 +52,24 @@ public enum NoopMetrics {
     public static let controlHeight: CGFloat = 48
     /// Fully-rounded corner radius — pills, chips, capsule buttons.
     public static let pillRadius: CGFloat = 999
+
+    /// Geometry for direct Today-section editing. The screen composes these shared values rather than
+    /// inventing gesture and lift dimensions alongside its content.
+    public enum TodayReorder {
+        /// Edge band where a lifted section begins scrolling the Today feed.
+        public static let autoScrollZone: CGFloat = 96
+        /// Maximum feed travel while a section is held at a viewport edge, in points per second.
+        public static let autoScrollMaxSpeed: CGFloat = 520
+        /// Small movement threshold before an edit-mode drag lifts the real card under the finger.
+        public static let dragMinimumDistance = NoopMetrics.space1
+        /// Subtle lift that distinguishes the card under the finger without resizing the layout.
+        public static let liftScale: CGFloat = 1.015
+        /// Large full-width cards need a much quieter edit wiggle than compact app icons.
+        public static let wiggleBaseAngle: Double = 0.22
+        public static let wiggleAngleStep: Double = 0.05
+        public static let wiggleBaseDistance: CGFloat = 0.25
+        public static let wiggleDistanceStep: CGFloat = 0.12
+    }
 }
 
 // MARK: - Screen padding
