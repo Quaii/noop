@@ -58,10 +58,12 @@ struct LiquidTodayView: View {
     /// (the entry is BETA-labelled in-UI); off removes the Start-session control entirely.
     @AppStorage(LiveSessionPrefs.betaKey) private var liveSessionsBeta = true
     // #today-layout (parity with Android): the user-chosen section order, persisted under the byte-identical
-    // "today.sectionOrder" key the Android TodayLayoutPrefs uses. Reordered via the Arrange sheet (native
-    // drag-to-reorder rows); every section always renders (decode inserts a missing one at its default spot).
+    // "today.sectionOrder" key the Android TodayLayoutPrefs uses. On iPhone a hold enters direct edit mode;
+    // the unified Customize Today sheet remains available on every platform for visibility and nested
+    // options. Decode inserts missing sections at their default positions.
     @AppStorage(TodayLayoutPrefs.orderKey) private var sectionOrderRaw = ""
     @AppStorage(TodayLayoutPrefs.hiddenKey) private var hiddenSectionsRaw = ""
+    @State private var todayLayoutEditing = false
     private var sectionOrder: [TodaySection] {
         TodayLayoutPrefs.visibleOrder(orderRaw: sectionOrderRaw, hiddenRaw: hiddenSectionsRaw)
     }
@@ -187,6 +189,7 @@ struct LiquidTodayView: View {
     private var daySwipeGesture: some Gesture {
         DragGesture(minimumDistance: 24)
             .onEnded { value in
+                guard !todayLayoutEditing else { return }
                 let dx = value.translation.width, dy = value.translation.height
                 guard abs(dx) > abs(dy) * 1.5, abs(dx) > 50 else { return }
                 let delta = dx < 0 ? 1 : -1
@@ -249,28 +252,23 @@ struct LiquidTodayView: View {
                     // pinned above the reorderable block so an active manual workout is immediately visible
                     // and taps straight through to Live. Renders nothing when no workout is active.
                     ActiveWorkoutIndicatorSection()
-                    // #today-layout (parity with Android): every Today section — the Charge/Effort/Rest hero
-                    // and Start-session included — renders in the user's saved order. Reorder via the Arrange
-                    // sheet (the header's up/down button; native drag rows); the order persists under the
-                    // byte-identical "today.sectionOrder" key Android uses. A gated-off Start-session renders
-                    // nothing and keeps its slot in the saved order.
-                    ForEach(sectionOrder) { section in
-                        switch section {
-                        case .hero: heroCard
-                        case .liveSession: if liveSessionsBeta { liveSessionStartRow }
-                        case .synthesis: synthesisSection
-                        case .keyMetrics: keyMetricsSection
-                        case .workouts: lastWorkoutsSection
-                        case .heartRate: heartRateSection
-                        case .recoveryVitals: recoveryVitalsSection
-                        case .yourCards: yourCardsSection
-                        // #656: the persistent journal widget (last-7-days strip + tap-through). Now a
-                        // reorderable section like the others — the Arrange sheet moves it. Today only;
-                        // the card self-hides when the reminder toggle is off (an empty branch renders
-                        // nothing yet keeps its slot). Twin of Android TodayScreen's JOURNAL arm.
-                        case .journal: if selectedDayOffset == 0 { JournalReminderCard() }
-                        }
+                    // iPhone uses a direct, home-screen-style editor: hold a section to enter edit mode,
+                    // then drag the actual content. It writes the same cross-platform order preference as
+                    // the unified editor; hidden sections remain hidden and keep their stable saved position.
+                    #if os(iOS)
+                    TodayReorderableSections(
+                        orderRaw: $sectionOrderRaw,
+                        editing: $todayLayoutEditing,
+                        sections: sectionOrder,
+                        coordinateSpace: Self.pullSpace
+                    ) { section in
+                        todaySection(section)
                     }
+                    #else
+                    ForEach(sectionOrder) { section in
+                        todaySection(section)
+                    }
+                    #endif
                     dataSourcesSection
                     Color.clear.frame(height: 90) // floating tab-bar clearance
                 }
@@ -355,6 +353,11 @@ struct LiquidTodayView: View {
         .onChange(of: scrollToTopSignal) { _, _ in
             withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(Self.topAnchorID, anchor: .top) }
         }
+        // Match home-screen editing: leaving Today ends the editing session, while ordinary data
+        // refreshes inside Today do not. The child reorder wrapper only cancels an in-flight drag.
+        .onDisappear {
+            todayLayoutEditing = false
+        }
         #endif
         }
     }
@@ -417,6 +420,7 @@ struct LiquidTodayView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(todayLayoutEditing)
                 .accessibilityLabel("\(dayTitle). Tap to pick a day, swipe to change day.")
                 .popover(isPresented: $showDayPicker) {
                     DatePicker("", selection: dayPickerBinding, in: ...Repository.logicalDay(Date()),
@@ -428,32 +432,39 @@ struct LiquidTodayView: View {
                         .liquidPopoverAdaptation()
                 }
                 Spacer(minLength: 8)
-                HStack(spacing: 8) {
-                    // Profile pic (the one set in Settings) → opens Settings, matching the classic Today.
-                    Button { showSettings = true } label: {
-                        ProfileAvatarView(imageData: profile.avatarImageData, size: 34)
-                            .frame(width: 34, height: 34)
+                HStack(spacing: NoopMetrics.space2) {
+                    #if os(iOS)
+                    if todayLayoutEditing {
+                        todayEditControl("Reset", tint: StrandPalette.onDarkSecondary) {
+                            StrandHaptic.selection.play()
+                            let enabledMetrics = Set(KeyMetricPrefs.decodeEnabled(keyMetricsRaw))
+                            let enabledCards = Set(DashboardCardPrefs.decodeEnabled(dashboardCardsRaw))
+                            withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+                                sectionOrderRaw = ""
+                                // These preferences combine visibility and order. Reset only the order;
+                                // never re-enable or remove items the user chose in the existing editors.
+                                keyMetricsRaw = KeyMetricPrefs.encode(
+                                    KeyMetric.defaultOrder.filter(enabledMetrics.contains)
+                                )
+                                dashboardCardsRaw = DashboardCardPrefs.encode(
+                                    DashboardCard.canonicalOrder.filter(enabledCards.contains)
+                                )
+                            }
+                        }
+                        todayEditControl("Done", tint: StrandPalette.onDarkPrimary) {
+                            StrandHaptic.commit.play()
+                            withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+                                todayLayoutEditing = false
+                            }
+                        }
+                    } else {
+                        standardSceneControls
                     }
-                    .buttonStyle(LiquidPressStyle())
-                    .accessibilityLabel("Profile and settings")
-                    LiquidAddButton()
-                    // #245: the Liquid header shipped with no sync indication at all (B1) — add it next to
-                    // the battery button, matching the issue's own ask ("near the battery percentage") and
-                    // the layout Android already uses (its SyncStatusChip sits in the same row as the
-                    // battery ring).
-                    LiquidSyncChip()
-                    LiquidBatteryButton()
-                    // One entry point for section order/visibility and both nested card editors.
-                    Button { customizationDestination = .today } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(.white.opacity(0.16)))
-                    }
-                    .buttonStyle(LiquidPressStyle())
-                    .accessibilityLabel("Customize Today")
+                    #else
+                    standardSceneControls
+                    #endif
                 }
+                .animation(reduceMotion ? nil : StrandMotion.interactive, value: todayLayoutEditing)
             }
             // Subtle NOOP wordmark in the sky between header and hero. Perfectly centred (a letter row has
             // no trailing tracking gap the way `Text(...).tracking()` does), with a tap easter egg.
@@ -465,6 +476,71 @@ struct LiquidTodayView: View {
                 .padding(.bottom, 10)
         }
     }
+
+    @ViewBuilder
+    private func todaySection(_ section: TodaySection) -> some View {
+        switch section {
+        case .hero: heroCard
+        case .liveSession:
+            if liveSessionsBeta { liveSessionStartRow }
+        case .synthesis: synthesisSection
+        case .keyMetrics: keyMetricsSection
+        case .workouts: lastWorkoutsSection
+        case .heartRate: heartRateSection
+        case .recoveryVitals: recoveryVitalsSection
+        case .yourCards: yourCardsSection
+        // #656: the persistent journal widget stays in the same saved order registry as every other
+        // Today section, but only renders on today and still honours its own reminder visibility gate.
+        case .journal:
+            if selectedDayOffset == 0 { JournalReminderCard() }
+        }
+    }
+
+    @ViewBuilder
+    private var standardSceneControls: some View {
+        Button { showSettings = true } label: {
+            ProfileAvatarView(imageData: profile.avatarImageData, size: 34)
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityLabel("Profile and settings")
+        LiquidAddButton()
+        // Keep the current sync affordance when direct editing is idle; LiveState remains isolated in
+        // this leaf so the Today root still does not redraw on every heart-rate notification.
+        LiquidSyncChip()
+        LiquidBatteryButton()
+        // The unified sheet owns visibility and detailed nested options. Direct edit mode complements it
+        // with in-place ordering rather than replacing it with another layout model.
+        Button { customizationDestination = .today } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(.white.opacity(0.16)))
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityLabel("Customize Today")
+    }
+
+    #if os(iOS)
+    private func todayEditControl(
+        _ title: LocalizedStringKey,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(StrandFont.subhead)
+                .fontWeight(.semibold)
+                .foregroundStyle(tint)
+                .padding(.horizontal, NoopMetrics.space3)
+                .frame(minHeight: NoopMetrics.space8)
+                .background(StrandPalette.onDarkPrimary.opacity(0.16), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(LiquidPressStyle())
+    }
+    #endif
 
     /// One-tap Live Session start (silent guardian, beta) — sits directly under the hero scores, the
     /// Charge its band is gated on. Same translucent chrome as the hero card so it reads as part of the
@@ -596,15 +672,30 @@ struct LiquidTodayView: View {
                         .foregroundStyle(StrandPalette.accent)
                 }
                 .buttonStyle(.plain)
+                .disabled(todayLayoutEditing)
             }
             .padding(.horizontal, 2)
             .padding(.top, 4)
 
-            // Data-driven off the SAME @AppStorage the CUSTOMISE editor writes, so add / remove /
-            // reorder in Customise reflects on the home screen live.
+            // Data-driven off the SAME @AppStorage the CUSTOMISE editor writes. On iPhone, every row
+            // is also its own direct drag target; macOS retains the existing editor-only interaction.
+            #if os(iOS)
+            TodayInlineReorderGrid(
+                editing: $todayLayoutEditing,
+                items: DashboardCardPrefs.decodeEnabled(dashboardCardsRaw),
+                columns: [GridItem(.flexible())],
+                spacing: NoopMetrics.space2,
+                coordinateSpace: Self.pullSpace,
+                accessibilityLabel: { $0.title },
+                onMove: { dashboardCardsRaw = DashboardCardPrefs.encode($0) }
+            ) { card in
+                liquidCard(for: card)
+            }
+            #else
             ForEach(DashboardCardPrefs.decodeEnabled(dashboardCardsRaw)) { card in
                 liquidCard(for: card)
             }
+            #endif
         }
     }
 
@@ -862,20 +953,38 @@ struct LiquidTodayView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit Key Metrics")
+                .disabled(todayLayoutEditing)
             }
-            // #430 parity: the grid honours the Key-Metrics editor (selection + order, all ten metrics)
-            // instead of a hard-coded six — the bespoke Sleep-hours ktile gives way to the shared REST
-            // score tile, aligning the liquid grid with the classic macOS grid and Android.
+            // #430 parity: the grid honours the Key-Metrics editor. On iPhone each visible tile is also
+            // directly reorderable in the shared Today edit mode, without adding a visual handle.
+            #if os(iOS)
+            TodayInlineReorderGrid(
+                editing: $todayLayoutEditing,
+                items: enabledKeyMetrics,
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: NoopMetrics.space2),
+                    count: 3
+                ),
+                spacing: NoopMetrics.space2,
+                coordinateSpace: Self.pullSpace,
+                accessibilityLabel: { $0.title },
+                onMove: { keyMetricsRaw = KeyMetricPrefs.encode($0) }
+            ) { metric in
+                ktileFor(metric, hrv: hrv, rhr: rhr)
+            }
+            #else
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                 ForEach(enabledKeyMetrics) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
                 }
             }
+            #endif
             NavigationLink(value: TabRoute.metricExplorer) {
                 Text("Show all metrics").font(StrandFont.subhead).foregroundStyle(StrandPalette.accent)
                     .frame(maxWidth: .infinity).padding(.top, 2)
             }
             .buttonStyle(.plain)
+            .disabled(todayLayoutEditing)
         }
     }
 
@@ -1604,6 +1713,7 @@ private struct LiquidRefreshIndicator: View {
     }
 }
 
+/// Quick-actions "+" button. Tap → the shell's quick-action menu.
 private struct LiquidAddButton: View {
     @EnvironmentObject var router: NavRouter
     var body: some View {

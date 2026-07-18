@@ -22,7 +22,7 @@ import SwiftUI
 
 /// One reorderable Today section. The rawValue is the stable persisted identifier — keep it byte-identical
 /// to the Android `TodaySection` enum so a backup/restore reads the same layout on either OS.
-enum TodaySection: String, CaseIterable, Identifiable {
+enum TodaySection: String, CaseIterable, Identifiable, Hashable {
     case hero
     case liveSession
     case synthesis
@@ -35,7 +35,7 @@ enum TodaySection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// The section's display label in the Arrange sheet — matches the Android `TodaySection.title`.
+    /// The section's display label in the direct editor and macOS Arrange sheet. Matches Android.
     var title: String {
         switch self {
         case .hero:           return String(localized: "Charge / Effort / Rest")
@@ -127,5 +127,22 @@ enum TodayLayoutPrefs {
     static func visibleOrder(orderRaw: String, hiddenRaw: String) -> [TodaySection] {
         let hidden = Set(decodeHidden(hiddenRaw))
         return decodeOrder(orderRaw).filter { !hidden.contains($0) }
+    }
+
+    /// Move one section to the crossed section's position. Downward moves land after the target;
+    /// upward moves land before it, matching both SwiftUI's list move and Android's live Today drag.
+    /// Invalid or no-op requests leave the order byte-for-byte unchanged.
+    static func moving(
+        _ section: TodaySection,
+        to target: TodaySection,
+        in order: [TodaySection]
+    ) -> [TodaySection] {
+        guard let from = order.firstIndex(of: section),
+              let to = order.firstIndex(of: target),
+              from != to else { return order }
+        var result = order
+        let moved = result.remove(at: from)
+        result.insert(moved, at: min(to, result.endIndex))
+        return result
     }
 }

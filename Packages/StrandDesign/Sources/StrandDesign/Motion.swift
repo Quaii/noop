@@ -63,6 +63,24 @@ public enum StrandMotion {
 
     /// Standard fade.
     public static let fade = Animation.easeInOut(duration: durationStandard)
+
+    // MARK: Direct section editing
+
+    /// Deliberate hold that enters Today edit mode without stealing an ordinary scroll.
+    public static let editHoldDuration: Double = 0.5
+    /// Time for a released card to glide from the finger back into its committed slot.
+    public static let reorderSettleDuration: Double = 0.22
+    /// Small deterministic variations keep neighbouring edit-mode cards out of lockstep.
+    public static let jiggleDurationStep: Double = 0.008
+    public static let jiggleDelayStep: Double = 0.014
+
+    /// One half-cycle of the home-screen-style edit jiggle. Callers vary duration and delay slightly
+    /// per item so neighbouring elements do not wobble in lockstep.
+    public static func jiggle(halfCycle: Double, delay: Double) -> Animation {
+        .easeInOut(duration: halfCycle)
+            .repeatForever(autoreverses: true)
+            .delay(delay)
+    }
 }
 
 #if DEBUG
