@@ -4694,15 +4694,14 @@ private fun HeartRateTrendCard(
     // (a calibrating 4.0 banks HR slowly) rather than that the screen broke. We intentionally do NOT silently
     // swap in a different day's curve here (that day-swap reload behaviour was rejected in #605, see above);
     // the honest empty state is the parity-matched fix. Mirrors the iOS Today HR card's empty branch.
-    // #985: the check reads the WINDOWED subset, and the pills stay visible in the empty state, so a
-    // too-narrow rolling window (say 1h with no recent offload) is never a dead end — the user widens it
-    // or steps back to Today, and the message says which window came up empty.
+    // #985: when only the WINDOWED subset is empty, keep the pills so the user can widen it. A genuinely
+    // empty day has no useful chart controls, so it collapses to the compact status copy instead.
     if (winBuckets.size < 2) {
         SectionHeader("Heart Rate", overline = selectedLabel)
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Overline("Beats per minute")
-                if (selectedDay == today) {
+                if (selectedDay == today && buckets.size >= 2) {
                     HrWindowPills(hrWindow) { hrWindowOrdinal = it.ordinal }
                 }
                 Text(
@@ -4712,7 +4711,7 @@ private fun HeartRateTrendCard(
                         hrWindow != HrWindow.TODAY && buckets.size >= 2 ->
                             "No heart rate in the last ${hrWindow.label}. Try a wider window or Today."
                         else ->
-                            "Calibrating , no heart rate banked yet today. Your curve fills in as the strap offloads."
+                            "No heart rate yet. Your curve fills in after the strap syncs."
                     },
                     style = NoopType.footnote,
                     color = Palette.textTertiary,

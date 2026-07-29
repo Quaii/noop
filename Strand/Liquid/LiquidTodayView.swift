@@ -63,7 +63,8 @@ struct LiquidTodayView: View {
     // options. Decode inserts missing sections at their default positions.
     @AppStorage(TodayLayoutPrefs.orderKey) private var sectionOrderRaw = ""
     @AppStorage(TodayLayoutPrefs.hiddenKey) private var hiddenSectionsRaw = ""
-    @State private var todayLayoutEditing = false
+    @State private var todayEditScope: TodayEditScope = .inactive
+    private var todayLayoutEditing: Bool { todayEditScope.isActive }
     private var sectionOrder: [TodaySection] {
         TodayLayoutPrefs.visibleOrder(orderRaw: sectionOrderRaw, hiddenRaw: hiddenSectionsRaw)
     }
@@ -259,7 +260,7 @@ struct LiquidTodayView: View {
                     #if os(iOS)
                     TodayReorderableSections(
                         orderRaw: $sectionOrderRaw,
-                        editing: $todayLayoutEditing,
+                        editScope: $todayEditScope,
                         sections: sectionOrder,
                         coordinateSpace: Self.pullSpace,
                         onRemove: hideTodaySection
@@ -361,7 +362,7 @@ struct LiquidTodayView: View {
         // Match home-screen editing: leaving Today ends the editing session, while ordinary data
         // refreshes inside Today do not. The child reorder wrapper only cancels an in-flight drag.
         .onDisappear {
-            todayLayoutEditing = false
+            todayEditScope = .inactive
         }
         #endif
         }
@@ -466,7 +467,7 @@ struct LiquidTodayView: View {
                         todayEditControl("Done", tint: StrandPalette.onDarkPrimary) {
                             StrandHaptic.commit.play()
                             withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
-                                todayLayoutEditing = false
+                                todayEditScope = .inactive
                             }
                         }
                     } else {
@@ -560,6 +561,16 @@ struct LiquidTodayView: View {
         }
         .buttonStyle(LiquidPressStyle())
         .accessibilityLabel(accessibilityLabel)
+    }
+    #endif
+
+    #if os(iOS)
+    private func beginSectionEditing() {
+        guard !todayEditScope.isActive else { return }
+        StrandHaptic.commit.play()
+        withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+            todayEditScope = .sections
+        }
     }
     #endif
 
@@ -696,18 +707,9 @@ struct LiquidTodayView: View {
             // added that parity in FullDayChartView.)
             NavigationLink(value: TabRoute.fullDayChart) {
                 card {
-                    VStack(spacing: 10) {
-                        // Isolated leaf: it observes LiveState so the ~1 Hz HR notifies re-render ONLY
-                        // this card, never the whole Today. Shows the current bpm live with a rolling
-                        // beat-by-beat trace; falls back to today's banked 5-minute trace when idle.
-                        LiquidLiveHR(tint: liquidHeart, fallback: hrValues, animated: dataLoaded)
-                        HStack(spacing: 4) {
-                            Spacer()
-                            Text("Full day").font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
-                            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(StrandPalette.accent)
-                        }
-                    }
+                    // Isolated leaf: it observes LiveState so the ~1 Hz HR notifies re-render ONLY this
+                    // card, never the whole Today. It owns both its expanded and compact-empty layouts.
+                    LiquidLiveHR(tint: liquidHeart, fallback: hrValues, animated: dataLoaded)
                 }
             }
             .buttonStyle(LiquidPressStyle())
@@ -720,8 +722,19 @@ struct LiquidTodayView: View {
     private var yourCardsSection: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("YOUR CARDS").font(StrandFont.overline).tracking(1.6)
+                Text("YOUR CARDS")
+                    .font(StrandFont.overline)
+                    .tracking(1.6)
                     .foregroundStyle(StrandPalette.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    #if os(iOS)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
+                            .onEnded { _ in beginSectionEditing() },
+                        including: todayLayoutEditing ? .none : .all
+                    )
+                    #endif
                 Spacer()
                 Button { customizationDestination = .yourCards } label: {
                     // #492 item 4 parity: unify the Your Cards / Key Metrics edit affordance to "EDIT" across
@@ -740,7 +753,8 @@ struct LiquidTodayView: View {
             // is also its own direct drag target; macOS retains the existing editor-only interaction.
             #if os(iOS)
             TodayInlineReorderGrid(
-                editing: $todayLayoutEditing,
+                editScope: $todayEditScope,
+                section: .yourCards,
                 items: DashboardCardPrefs.decodeEnabled(dashboardCardsRaw),
                 columns: [GridItem(.flexible())],
                 spacing: NoopMetrics.space2,
@@ -1012,6 +1026,14 @@ struct LiquidTodayView: View {
         return VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 sectionHead("KEY METRICS", trailing: trendWindowLabel)
+                    #if os(iOS)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
+                            .onEnded { _ in beginSectionEditing() },
+                        including: todayLayoutEditing ? .none : .all
+                    )
+                    #endif
                 // #430 parity: the SAME editor the classic grid uses — selection + order + Detailed tiles.
                 Button { customizationDestination = .keyMetrics } label: {
                     Text(String(localized: "Edit").uppercased())
@@ -1027,7 +1049,8 @@ struct LiquidTodayView: View {
             // directly reorderable in the shared Today edit mode, without adding a visual handle.
             #if os(iOS)
             TodayInlineReorderGrid(
-                editing: $todayLayoutEditing,
+                editScope: $todayEditScope,
+                section: .keyMetrics,
                 items: enabledKeyMetrics,
                 columns: Array(
                     repeating: GridItem(.flexible(), spacing: NoopMetrics.space2),
@@ -1923,13 +1946,26 @@ private struct LiquidLiveHR: View {
     }
 
     var body: some View {
+        Group {
+            if series.count >= 2 {
+                expandedContent
+            } else {
+                compactEmptyContent
+            }
+        }
+        .onAppear { if samples.isEmpty, let hr = live.heartRate, hr > 0 { samples = [Double(hr)] } }
+        .onChangeCompat(of: live.heartRate) { hr in
+            guard let hr, hr > 0 else { return }
+            samples.append(Double(hr))
+            if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
+            beat.toggle()
+        }
+    }
+
+    private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("BEATS PER MINUTE").font(StrandFont.overline).tracking(1.6)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                    Text(subtitle).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
-                }
+                titleAndSubtitle
                 Spacer()
                 if isLive {
                     // A gentle heartbeat dot that pulses with each incoming sample.
@@ -1947,30 +1983,51 @@ private struct LiquidLiveHR: View {
                         .animation(.easeOut(duration: 0.25), value: hr)
                 }
             }
-            if series.count >= 2 {
-                LiquidThread(bpm: series, tint: tint, height: 92, animated: animated)
-                HStack {
-                    stat(String(localized: "Min"), series.min())
-                    Spacer()
-                    stat(String(localized: "Avg"), series.reduce(0, +) / Double(series.count))
-                    Spacer()
-                    stat(String(localized: "Max"), series.max())
-                }
-            } else {
-                Text(live.connected ? "Waiting for a live heartbeat…" : "Connect your strap to see live heart rate")
-                    .font(StrandFont.caption)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 24)
+            LiquidThread(bpm: series, tint: tint, height: 92, animated: animated)
+            HStack {
+                stat(String(localized: "Min"), series.min())
+                Spacer()
+                stat(String(localized: "Avg"), series.reduce(0, +) / Double(series.count))
+                Spacer()
+                stat(String(localized: "Max"), series.max())
             }
+            fullDayAffordance
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .onAppear { if samples.isEmpty, let hr = live.heartRate, hr > 0 { samples = [Double(hr)] } }
-        .onChangeCompat(of: live.heartRate) { hr in
-            guard let hr, hr > 0 else { return }
-            samples.append(Double(hr))
-            if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
-            beat.toggle()
+    }
+
+    /// No chart-sized placeholder: one status row carries the same information and route in a fraction
+    /// of the height. A first live sample can still show its bpm while the trace gathers a second point.
+    private var compactEmptyContent: some View {
+        HStack(alignment: .center, spacing: 10) {
+            titleAndSubtitle
+            Spacer(minLength: 8)
+            if let hr = bigBpm {
+                (Text("\(hr)").font(StrandFont.rounded(20)).monospacedDigit()
+                    + Text(" bpm").font(StrandFont.caption))
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+            }
+            fullDayAffordance
         }
+    }
+
+    private var titleAndSubtitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("BEATS PER MINUTE").font(StrandFont.overline).tracking(1.6)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Text(subtitle).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+                .lineLimit(2)
+        }
+    }
+
+    private var fullDayAffordance: some View {
+        HStack(spacing: 4) {
+            Text("Full day").font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
+            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+        }
+        .fixedSize()
     }
 
     private func stat(_ label: String, _ v: Double?) -> some View {

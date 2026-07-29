@@ -3017,28 +3017,34 @@ struct TodayView: View {
                 hrZoomHint
             }
         } else {
-            // #863: an empty / single-bucket day. A calibrating 4.0 banks HR slowly, so an empty curve early
-            // on isn't a fault , say so explicitly instead of leaving a blank where the chart was (which read
-            // as the graph freezing). We don't silently swap in another day's curve here; the honest empty
-            // state is the parity-matched fix. Mirrors the Android HeartRateTrendCard empty branch.
+            // #863: an empty / single-bucket day. Keep the honest status, but do not reserve ChartCard's
+            // chart-sized content area when there is no curve to draw.
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("Heart Rate", overline: "\(selectedDayOverline)")
-                ChartCard(
-                    title: "Beats per minute",
-                    subtitle: selectedDayOffset == 0
-                        ? String(localized: "Calibrating, no heart rate banked yet today")
-                        : String(localized: "No heart rate for this day"),
-                    trailing: nil,
-                    tint: StrandPalette.metricRose
-                ) {
-                    Text(selectedDayOffset == 0
-                        ? "Your curve fills in as the strap offloads its history."
-                        : "Step back to a day the strap was worn.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .multilineTextAlignment(.center)
+                NoopCard {
+                    HStack(alignment: .center, spacing: NoopMetrics.space3) {
+                        VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                            Text("Beats per minute")
+                                .strandOverline()
+                            Text(selectedDayOffset == 0
+                                ? "No heart rate yet. The curve fills in after your strap syncs."
+                                : "No heart rate recorded for this day.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: NoopMetrics.space2)
+                        Image(systemName: "heart.slash")
+                            .font(StrandFont.title2)
+                            .foregroundStyle(StrandPalette.metricRose)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.vertical, NoopMetrics.space1)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(selectedDayOffset == 0
+                    ? "Heart rate. No heart rate yet. The curve fills in after your strap syncs."
+                    : "Heart rate. No heart rate recorded for this day.")
             }
         }
     }

@@ -5,8 +5,9 @@ import StrandDesign
 /// Direct manipulation for the items inside a Today section. The rendered tile or row is the only
 /// affordance: a deliberate hold enters the shared edit mode, then the rendered item itself drags.
 struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: View {
-    @Binding private var editing: Bool
+    @Binding private var editScope: TodayEditScope
 
+    private let section: TodaySection
     private let items: [Item]
     private let columns: [GridItem]
     private let spacing: CGFloat
@@ -30,7 +31,8 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
     @State private var settleTask: Task<Void, Never>?
 
     init(
-        editing: Binding<Bool>,
+        editScope: Binding<TodayEditScope>,
+        section: TodaySection,
         items: [Item],
         columns: [GridItem],
         spacing: CGFloat,
@@ -40,7 +42,8 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
         onRemove: @escaping (Item) -> Void,
         @ViewBuilder content: @escaping (Item) -> Content
     ) {
-        _editing = editing
+        _editScope = editScope
+        self.section = section
         self.items = items
         self.columns = columns
         self.spacing = spacing
@@ -67,8 +70,8 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
                 reorderIfNeeded()
             }
         }
-        .onChange(of: editing) { _, isEditing in
-            if isEditing {
+        .onChange(of: editScope) { _, scope in
+            if scope == .inline(section) {
                 // A long press that flips the shared editing binding must not strand the enclosing
                 // UIScrollView in a paused state as SwiftUI swaps in the reorder gesture.
                 scrollProxy.setUserScrollingEnabled(true)
@@ -84,13 +87,14 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
 
     private func itemContainer(_ item: Item) -> some View {
         let isDragged = draggingItem == item
+        let editing = editScope == .inline(section)
 
         return ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 content(item)
-                    .disabled(editing)
-                    .allowsHitTesting(!editing)
-                    .accessibilityHidden(editing)
+                    .disabled(editScope.isActive)
+                    .allowsHitTesting(!editScope.isActive)
+                    .accessibilityHidden(editScope.isActive)
 
                 TodayRemoveBadge(
                     label: accessibilityLabel(item),
@@ -130,7 +134,7 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
         .simultaneousGesture(
             LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
                 .onEnded { _ in beginEditing() },
-            including: editing ? .none : .all
+            including: editScope.isActive ? .none : .all
         )
     }
 
@@ -173,10 +177,10 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
     }
 
     private func beginEditing() {
-        guard !editing else { return }
+        guard !editScope.isActive else { return }
         StrandHaptic.commit.play()
         withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
-            editing = true
+            editScope = .inline(section)
         }
     }
 

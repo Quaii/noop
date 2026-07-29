@@ -7,7 +7,7 @@ import StrandDesign
 /// their individual children; while editing, their header remains a handle for moving the whole group.
 struct TodayReorderableSections<Content: View>: View {
     @Binding private var orderRaw: String
-    @Binding private var editing: Bool
+    @Binding private var editScope: TodayEditScope
 
     private let sections: [TodaySection]
     private let coordinateSpace: String
@@ -28,14 +28,14 @@ struct TodayReorderableSections<Content: View>: View {
 
     init(
         orderRaw: Binding<String>,
-        editing: Binding<Bool>,
+        editScope: Binding<TodayEditScope>,
         sections: [TodaySection],
         coordinateSpace: String,
         onRemove: @escaping (TodaySection) -> Void,
         @ViewBuilder content: @escaping (TodaySection) -> Content
     ) {
         _orderRaw = orderRaw
-        _editing = editing
+        _editScope = editScope
         self.sections = sections
         self.coordinateSpace = coordinateSpace
         self.onRemove = onRemove
@@ -58,8 +58,8 @@ struct TodayReorderableSections<Content: View>: View {
                 reorderIfNeeded()
             }
         }
-        .onChange(of: editing) { _, isEditing in
-            if isEditing {
+        .onChange(of: editScope) { _, scope in
+            if scope == .sections {
                 // Entering edit mode replaces the long-press recognizer while that same touch is still
                 // ending. Keep the native scroll view explicitly armed so the replacement cannot leave
                 // it paused before the user has actually picked a section up.
@@ -77,36 +77,38 @@ struct TodayReorderableSections<Content: View>: View {
     private func sectionContainer(_ section: TodaySection) -> some View {
         let isDragged = draggingSection == section
         let hasInlineItems = section == .keyMetrics || section == .yourCards
+        let editingSections = editScope == .sections
+        let editingThisInlineSection = editScope == .inline(section)
 
         return ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 content(section)
-                    .disabled(editing && !hasInlineItems)
-                    .allowsHitTesting(!editing || hasInlineItems)
-                    .accessibilityHidden(editing && !hasInlineItems)
+                    .disabled(editScope.isActive && !editingThisInlineSection)
+                    .allowsHitTesting(!editScope.isActive || editingThisInlineSection)
+                    .accessibilityHidden(editScope.isActive && !editingThisInlineSection)
 
-                if editing, hasInlineItems {
+                if editingSections, hasInlineItems {
                     nestedSectionHeaderDragSurface(section)
                 }
             }
             .overlay(alignment: .topLeading) {
                 TodayRemoveBadge(
                     label: section.title,
-                    visible: editing && sections.count > 1,
+                    visible: editingSections && sections.count > 1,
                     action: { remove(section) }
                 )
             }
                 .modifier(
                     TodayReorderJiggleModifier(
                         stableID: section.rawValue,
-                        active: editing && !hasInlineItems && !isDragged,
+                        active: editingSections && !isDragged,
                         compact: false
                     )
                 )
                 .scaleEffect(isDragged ? NoopMetrics.TodayReorder.liftScale : 1)
                 .offset(y: dragOffset(for: section))
 
-            if editing {
+            if editingSections {
                 sectionAccessibilitySurface(section)
             }
         }
@@ -125,12 +127,12 @@ struct TodayReorderableSections<Content: View>: View {
         .zIndex(isDragged ? 10 : 0)
         .simultaneousGesture(
             reorderGesture(for: section),
-            including: editing && !hasInlineItems ? .all : .none
+            including: editingSections && !hasInlineItems ? .all : .none
         )
         .simultaneousGesture(
             LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
                 .onEnded { _ in beginEditing() },
-            including: !editing && !hasInlineItems ? .all : .none
+            including: !editScope.isActive && !hasInlineItems ? .all : .none
         )
         .accessibilityAction(named: Text("Arrange Today")) {
             beginEditing()
@@ -146,7 +148,7 @@ struct TodayReorderableSections<Content: View>: View {
             .frame(height: NoopMetrics.controlHeight)
             .simultaneousGesture(
                 reorderGesture(for: section),
-                including: editing ? .all : .none
+                including: editScope == .sections ? .all : .none
             )
             .accessibilityHidden(true)
     }
@@ -190,10 +192,10 @@ struct TodayReorderableSections<Content: View>: View {
     }
 
     private func beginEditing() {
-        guard !editing else { return }
+        guard !editScope.isActive else { return }
         StrandHaptic.commit.play()
         withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
-            editing = true
+            editScope = .sections
         }
     }
 

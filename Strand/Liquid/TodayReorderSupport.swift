@@ -1,3 +1,15 @@
+/// The direct Today editor has two distinct levels. Holding a section header arranges the complete
+/// Today feed; holding a tile or row arranges only the children in that section.
+enum TodayEditScope: Equatable {
+    case inactive
+    case sections
+    case inline(TodaySection)
+
+    var isActive: Bool {
+        self != .inactive
+    }
+}
+
 #if os(iOS)
 import SwiftUI
 import UIKit
