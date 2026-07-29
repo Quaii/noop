@@ -13,6 +13,7 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
     private let coordinateSpace: String
     private let accessibilityLabel: (Item) -> String
     private let onMove: ([Item]) -> Void
+    private let onRemove: (Item) -> Void
     private let content: (Item) -> Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -36,6 +37,7 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
         coordinateSpace: String,
         accessibilityLabel: @escaping (Item) -> String,
         onMove: @escaping ([Item]) -> Void,
+        onRemove: @escaping (Item) -> Void,
         @ViewBuilder content: @escaping (Item) -> Content
     ) {
         _editing = editing
@@ -45,6 +47,7 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
         self.coordinateSpace = coordinateSpace
         self.accessibilityLabel = accessibilityLabel
         self.onMove = onMove
+        self.onRemove = onRemove
         self.content = content
     }
 
@@ -65,7 +68,11 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
             }
         }
         .onChange(of: editing) { _, isEditing in
-            if !isEditing {
+            if isEditing {
+                // A long press that flips the shared editing binding must not strand the enclosing
+                // UIScrollView in a paused state as SwiftUI swaps in the reorder gesture.
+                scrollProxy.setUserScrollingEnabled(true)
+            } else {
                 resetDrag()
             }
         }
@@ -78,10 +85,19 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
     private func itemContainer(_ item: Item) -> some View {
         let isDragged = draggingItem == item
 
-        return ZStack {
-            content(item)
-                .allowsHitTesting(!editing)
-                .accessibilityHidden(editing)
+        return ZStack(alignment: .topLeading) {
+            ZStack(alignment: .topLeading) {
+                content(item)
+                    .disabled(editing)
+                    .allowsHitTesting(!editing)
+                    .accessibilityHidden(editing)
+
+                TodayRemoveBadge(
+                    label: accessibilityLabel(item),
+                    visible: editing && items.count > 1,
+                    action: { remove(item) }
+                )
+            }
                 .modifier(
                     TodayReorderJiggleModifier(
                         stableID: String(describing: item.id),
@@ -107,20 +123,38 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
             }
         }
         .zIndex(isDragged ? 20 : 0)
-        .highPriorityGesture(
-            DragGesture(
-                minimumDistance: NoopMetrics.TodayReorder.dragMinimumDistance,
-                coordinateSpace: .named(coordinateSpace)
-            )
-            .onChanged { handleDragChanged($0, item: item) }
-            .onEnded { _ in finishDrag() },
+        .simultaneousGesture(
+            reorderGesture(for: item),
             including: editing ? .all : .none
         )
-        .highPriorityGesture(
+        .simultaneousGesture(
             LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
                 .onEnded { _ in beginEditing() },
             including: editing ? .none : .all
         )
+    }
+
+    /// A normal edit-mode flick remains a ScrollView gesture. Holding briefly before moving picks up
+    /// this item, after which the existing edge auto-scroll keeps long rearrangements possible.
+    private func reorderGesture(for item: Item) -> some Gesture {
+        LongPressGesture(
+            minimumDuration: StrandMotion.reorderHoldDuration,
+            maximumDistance: NoopMetrics.TodayReorder.holdMovementTolerance
+        )
+        .sequenced(
+            before: DragGesture(
+                minimumDistance: 0,
+                coordinateSpace: .named(coordinateSpace)
+            )
+        )
+        .onChanged { value in
+            guard case .second(true, let drag?) = value else { return }
+            handleDragChanged(drag, item: item)
+        }
+        .onEnded { value in
+            guard case .second(true, _) = value else { return }
+            finishDrag()
+        }
     }
 
     private func itemAccessibilitySurface(_ item: Item) -> some View {
@@ -146,6 +180,14 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
         }
     }
 
+    private func remove(_ item: Item) {
+        guard items.count > 1 else { return }
+        StrandHaptic.selection.play()
+        withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+            onRemove(item)
+        }
+    }
+
     private func handleDragChanged(_ value: DragGesture.Value, item: Item) {
         if draggingItem == nil {
             guard let frame = itemFrames[item] else { return }
@@ -154,6 +196,7 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
             draggingItem = item
             pickedUpOrigin = frame.origin
             pickedUpSize = frame.size
+            scrollProxy.setUserScrollingEnabled(false)
             StrandHaptic.light.play()
         }
 
@@ -303,6 +346,7 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
     }
 
     private func clearDragState() {
+        scrollProxy.setUserScrollingEnabled(true)
         draggingItem = nil
         pickedUpOrigin = .zero
         pickedUpSize = .zero

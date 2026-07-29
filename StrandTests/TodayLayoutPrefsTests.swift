@@ -119,6 +119,36 @@ final class TodayLayoutPrefsTests: XCTestCase {
         XCTAssertEqual(draft.visible, [.hrv])
     }
 
+    func testFreshKeyMetricsHideDuplicatedScoreTilesByDefault() {
+        XCTAssertEqual(KeyMetricPrefs.decodeEnabled(""), KeyMetric.defaultSelection)
+        XCTAssertEqual(
+            KeyMetric.defaultSelection,
+            [.hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .calories]
+        )
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.charge))
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.effort))
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.rest))
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.weight))
+        XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
+    }
+
+    func testMetricExplorerCatalogIsAvailableToKeyMetricsAndRoundTrips() {
+        XCTAssertGreaterThan(KeyMetric.catalogOptions.count, 20)
+        let sourceGroups = Set(KeyMetric.catalogOptions.compactMap(\.customizationSourceGroup))
+        XCTAssertTrue(sourceGroups.isSuperset(of: [
+            "Whoop", "Apple Health", "Mi Band", "Nutrition", "Mood",
+        ]))
+
+        for metric in KeyMetric.catalogOptions {
+            XCTAssertNotNil(metric.catalogDescriptor)
+            XCTAssertEqual(
+                KeyMetricPrefs.decodeEnabled(KeyMetricPrefs.encode([metric])),
+                [metric]
+            )
+        }
+        XCTAssertEqual(KeyMetricPrefs.decodeEnabled("removed-catalog-entry"), KeyMetric.defaultSelection)
+    }
+
     func testMovingSectionDownLandsAfterCrossedTarget() {
         XCTAssertEqual(
             TodayLayoutPrefs.moving(.hero, to: .synthesis, in: TodaySection.defaultOrder),

@@ -5,9 +5,10 @@ import android.content.Context
 // MARK: - Editable Key-Metrics layout (#251)
 //
 // The Today screen's "Key Metrics" grid was a fixed list of ten tiles in one order. This lets the user
-// choose WHICH tiles show and in WHAT order, with the default being the original order so nothing changes
-// for anyone who never opens the editor. Persistence is display-only — no metric is computed or stored
-// differently; this just decides which of the already-computed tiles render and in what sequence.
+// choose WHICH tiles show and in WHAT order. The complete catalogue retains the original order, while
+// fresh installs omit the three score tiles already represented by the Charge / Effort / Rest hero and
+// the optional Weight tile. Persistence is display-only — no metric is computed or stored differently;
+// this just decides which of the already-computed tiles render and in what sequence.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
 // same mechanism every other Android preference uses. Mirrors the macOS KeyMetricPrefs.swift +
@@ -33,10 +34,15 @@ enum class KeyMetric(val raw: String, val title: String) {
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }
 
-        /** The original, hard-coded grid order — the default when the layout isn't customised. */
+        /** The complete metric catalogue in its original, hard-coded grid order. */
         val defaultOrder: List<KeyMetric> = listOf(
             CHARGE, EFFORT, REST, HRV, RESTING_HR,
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
+        )
+
+        /** Fresh-install selection: the hero's three score tiles and Weight remain available, but start hidden. */
+        val defaultSelection: List<KeyMetric> = listOf(
+            HRV, RESTING_HR, BLOOD_OXYGEN, RESPIRATORY, STEPS, CALORIES,
         )
     }
 }
@@ -72,7 +78,7 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putInt(KEY_WINDOW, value).apply()
     }
 
-    /** The enabled tiles in display order. An empty/unset string yields the full default order. */
+    /** The enabled tiles in display order. An empty/unset string yields the fresh-install selection. */
     fun enabled(context: Context): List<KeyMetric> =
         decodeEnabled(NoopPrefs.of(context).getString(KEY_LAYOUT, null))
 
@@ -86,16 +92,16 @@ object KeyMetricPrefs {
 
     /**
      * Decode the stored string into an ordered list of enabled tiles. An empty/unset string yields the
-     * full default order (so a fresh install shows every tile). Unknown tokens are ignored, duplicates
-     * collapsed; this returns ONLY the enabled tiles in their saved order.
+     * fresh-install selection. Unknown tokens are ignored, duplicates collapsed; this returns ONLY the
+     * enabled tiles in their saved order.
      */
     fun decodeEnabled(raw: String?): List<KeyMetric> {
         val trimmed = raw?.trim().orEmpty()
-        if (trimmed.isEmpty()) return KeyMetric.defaultOrder
+        if (trimmed.isEmpty()) return KeyMetric.defaultSelection
         val seen = LinkedHashSet<KeyMetric>()
         trimmed.split(",").forEach { token ->
             KeyMetric.fromRaw(token.trim())?.let { seen.add(it) }
         }
-        return if (seen.isEmpty()) KeyMetric.defaultOrder else seen.toList()
+        return if (seen.isEmpty()) KeyMetric.defaultSelection else seen.toList()
     }
 }

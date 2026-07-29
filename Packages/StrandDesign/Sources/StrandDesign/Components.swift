@@ -63,15 +63,38 @@ public enum NoopMetrics {
         public static let autoScrollZone: CGFloat = 96
         /// Maximum feed travel while a section is held at a viewport edge, in points per second.
         public static let autoScrollMaxSpeed: CGFloat = 520
-        /// Small movement threshold before an edit-mode drag lifts the real card under the finger.
-        public static let dragMinimumDistance = NoopMetrics.space1
+        /// A small movement allowance lets an ordinary vertical flick fail the hold and remain a scroll.
+        public static let holdMovementTolerance: CGFloat = NoopMetrics.space3
         /// Subtle lift that distinguishes the card under the finger without resizing the layout.
         public static let liftScale: CGFloat = 1.015
-        /// Large full-width cards need a much quieter edit wiggle than compact app icons.
-        public static let wiggleBaseAngle: Double = 0.22
-        public static let wiggleAngleStep: Double = 0.05
-        public static let wiggleBaseDistance: CGFloat = 0.25
-        public static let wiggleDistanceStep: CGFloat = 0.12
+        /// Large full-width cards need a quieter edit wiggle than compact metric tiles.
+        public static let sectionWiggleBaseAngle: Double = 0.38
+        public static let sectionWiggleAngleStep: Double = 0.08
+        public static let sectionWiggleBaseDistance: CGFloat = 0.28
+        public static let sectionWiggleDistanceStep: CGFloat = 0.08
+        /// Compact tiles use the same home-screen cadence and amplitude as Quick Launch favourites.
+        public static let tileWiggleBaseAngle: Double = 1.6
+        public static let tileWiggleAngleStep: Double = 0.25
+        public static let tileWiggleBaseDistance: CGFloat = 0.45
+        public static let tileWiggleDistanceStep: CGFloat = 0.15
+        /// The visible remove symbol is compact while its invisible hit target remains comfortable.
+        public static let removeBadgeSymbol: CGFloat = 20
+        public static let removeBadgeHitTarget: CGFloat = 34
+        public static let removeBadgeInset: CGFloat = 2
+        public static let removeBadgeOffset: CGFloat = 7
+    }
+
+    /// Optical corner-radius tiers for the mixed card sizes on Today. A short action row should not
+    /// become a capsule just because a full content card uses the canonical 22-point radius.
+    public enum TodayCard {
+        /// Short, full-width rows and empty states (Start Session, Your Cards, Data Sources).
+        public static let compactRadius: CGFloat = 14
+        /// Narrow metric tiles and medium workout cards.
+        public static let tileRadius: CGFloat = 16
+        /// Ordinary content cards such as Synthesis, Heart Rate, and Recovery Vitals.
+        public static let standardRadius: CGFloat = NoopMetrics.cardRadius
+        /// The oversized Charge / Effort / Rest hero.
+        public static let heroRadius: CGFloat = 26
     }
 }
 

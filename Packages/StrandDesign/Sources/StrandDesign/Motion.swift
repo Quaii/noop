@@ -68,11 +68,14 @@ public enum StrandMotion {
 
     /// Deliberate hold that enters Today edit mode without stealing an ordinary scroll.
     public static let editHoldDuration: Double = 0.5
+    /// Shorter hold used once already editing: a flick scrolls, while a stationary hold picks an item up.
+    public static let reorderHoldDuration: Double = 0.24
     /// Time for a released card to glide from the finger back into its committed slot.
     public static let reorderSettleDuration: Double = 0.22
-    /// Small deterministic variations keep neighbouring edit-mode cards out of lockstep.
+    /// Quick Launch's home-screen cadence, varied deterministically so neighbouring items drift apart.
+    public static let jiggleBaseHalfCycle: Double = 0.135
     public static let jiggleDurationStep: Double = 0.008
-    public static let jiggleDelayStep: Double = 0.014
+    public static let jiggleDelayStep: Double = 0.018
 
     /// One half-cycle of the home-screen-style edit jiggle. Callers vary duration and delay slightly
     /// per item so neighbouring elements do not wobble in lockstep.

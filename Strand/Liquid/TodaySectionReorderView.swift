@@ -11,6 +11,7 @@ struct TodayReorderableSections<Content: View>: View {
 
     private let sections: [TodaySection]
     private let coordinateSpace: String
+    private let onRemove: (TodaySection) -> Void
     private let content: (TodaySection) -> Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -30,17 +31,19 @@ struct TodayReorderableSections<Content: View>: View {
         editing: Binding<Bool>,
         sections: [TodaySection],
         coordinateSpace: String,
+        onRemove: @escaping (TodaySection) -> Void,
         @ViewBuilder content: @escaping (TodaySection) -> Content
     ) {
         _orderRaw = orderRaw
         _editing = editing
         self.sections = sections
         self.coordinateSpace = coordinateSpace
+        self.onRemove = onRemove
         self.content = content
     }
 
     var body: some View {
-        VStack(spacing: NoopMetrics.gap) {
+        TodayCollapsingVStack(spacing: NoopMetrics.gap) {
             ForEach(sections) { section in
                 sectionContainer(section)
             }
@@ -56,7 +59,12 @@ struct TodayReorderableSections<Content: View>: View {
             }
         }
         .onChange(of: editing) { _, isEditing in
-            if !isEditing {
+            if isEditing {
+                // Entering edit mode replaces the long-press recognizer while that same touch is still
+                // ending. Keep the native scroll view explicitly armed so the replacement cannot leave
+                // it paused before the user has actually picked a section up.
+                scrollProxy.setUserScrollingEnabled(true)
+            } else {
                 resetDrag()
             }
         }
@@ -70,10 +78,24 @@ struct TodayReorderableSections<Content: View>: View {
         let isDragged = draggingSection == section
         let hasInlineItems = section == .keyMetrics || section == .yourCards
 
-        return ZStack(alignment: .top) {
-            content(section)
-                .allowsHitTesting(!editing || hasInlineItems)
-                .accessibilityHidden(editing && !hasInlineItems)
+        return ZStack(alignment: .topLeading) {
+            ZStack(alignment: .topLeading) {
+                content(section)
+                    .disabled(editing && !hasInlineItems)
+                    .allowsHitTesting(!editing || hasInlineItems)
+                    .accessibilityHidden(editing && !hasInlineItems)
+
+                if editing, hasInlineItems {
+                    nestedSectionHeaderDragSurface(section)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                TodayRemoveBadge(
+                    label: section.title,
+                    visible: editing && sections.count > 1,
+                    action: { remove(section) }
+                )
+            }
                 .modifier(
                     TodayReorderJiggleModifier(
                         stableID: section.rawValue,
@@ -86,9 +108,6 @@ struct TodayReorderableSections<Content: View>: View {
 
             if editing {
                 sectionAccessibilitySurface(section)
-                if hasInlineItems {
-                    nestedSectionHeaderDragSurface(section)
-                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -104,16 +123,11 @@ struct TodayReorderableSections<Content: View>: View {
             }
         }
         .zIndex(isDragged ? 10 : 0)
-        .highPriorityGesture(
-            DragGesture(
-                minimumDistance: NoopMetrics.TodayReorder.dragMinimumDistance,
-                coordinateSpace: .named(coordinateSpace)
-            )
-            .onChanged { handleDragChanged($0, section: section) }
-            .onEnded { _ in finishDrag() },
+        .simultaneousGesture(
+            reorderGesture(for: section),
             including: editing && !hasInlineItems ? .all : .none
         )
-        .highPriorityGesture(
+        .simultaneousGesture(
             LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
                 .onEnded { _ in beginEditing() },
             including: !editing && !hasInlineItems ? .all : .none
@@ -130,15 +144,34 @@ struct TodayReorderableSections<Content: View>: View {
             .fill(.clear)
             .contentShape(Rectangle())
             .frame(height: NoopMetrics.controlHeight)
-            .gesture(
-                DragGesture(
-                    minimumDistance: NoopMetrics.TodayReorder.dragMinimumDistance,
-                    coordinateSpace: .named(coordinateSpace)
-                )
-                    .onChanged { handleDragChanged($0, section: section) }
-                    .onEnded { _ in finishDrag() }
+            .simultaneousGesture(
+                reorderGesture(for: section),
+                including: editing ? .all : .none
             )
             .accessibilityHidden(true)
+    }
+
+    /// Once edit mode is active, an ordinary flick must stay owned by the enclosing ScrollView.
+    /// Holding briefly before dragging lifts the section instead, matching the Quick Launch editor.
+    private func reorderGesture(for section: TodaySection) -> some Gesture {
+        LongPressGesture(
+            minimumDuration: StrandMotion.reorderHoldDuration,
+            maximumDistance: NoopMetrics.TodayReorder.holdMovementTolerance
+        )
+        .sequenced(
+            before: DragGesture(
+                minimumDistance: 0,
+                coordinateSpace: .named(coordinateSpace)
+            )
+        )
+        .onChanged { value in
+            guard case .second(true, let drag?) = value else { return }
+            handleDragChanged(drag, section: section)
+        }
+        .onEnded { value in
+            guard case .second(true, _) = value else { return }
+            finishDrag()
+        }
     }
 
     private func sectionAccessibilitySurface(_ section: TodaySection) -> some View {
@@ -164,6 +197,14 @@ struct TodayReorderableSections<Content: View>: View {
         }
     }
 
+    private func remove(_ section: TodaySection) {
+        guard sections.count > 1 else { return }
+        StrandHaptic.selection.play()
+        withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+            onRemove(section)
+        }
+    }
+
     private func handleDragChanged(_ value: DragGesture.Value, section: TodaySection) {
         if draggingSection == nil {
             guard let frame = sectionFrames[section] else { return }
@@ -171,6 +212,7 @@ struct TodayReorderableSections<Content: View>: View {
             settleTask = nil
             draggingSection = section
             pickedUpMinY = frame.minY
+            scrollProxy.setUserScrollingEnabled(false)
             StrandHaptic.light.play()
         }
 
@@ -316,6 +358,7 @@ struct TodayReorderableSections<Content: View>: View {
     }
 
     private func clearDragState() {
+        scrollProxy.setUserScrollingEnabled(true)
         draggingSection = nil
         pickedUpMinY = 0
         dragTranslationY = 0
@@ -331,6 +374,55 @@ private struct TodaySectionFramePreferenceKey: PreferenceKey {
         nextValue: () -> [TodaySection: CGRect]
     ) {
         value.merge(nextValue()) { _, latest in latest }
+    }
+}
+
+/// A section whose leaf renders nothing (for example, a disabled Journal reminder) must not leave a
+/// phantom card slot or an extra pair of gaps behind. Standard VStack spacing is applied around a
+/// zero-height wrapper, so place only sections that have visible height.
+private struct TodayCollapsingVStack: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let sizes = subviews.map {
+            $0.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        }
+        let visible = sizes.filter { $0.height > 0 }
+        let width = proposal.width ?? visible.map(\.width).max() ?? 0
+        let height = visible.map(\.height).reduce(0, +)
+            + spacing * CGFloat(max(0, visible.count - 1))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var y = bounds.minY
+        var placedVisibleSubview = false
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(
+                ProposedViewSize(width: bounds.width, height: nil)
+            )
+            guard size.height > 0 else { continue }
+            if placedVisibleSubview {
+                y += spacing
+            }
+            subview.place(
+                at: CGPoint(x: bounds.minX, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: bounds.width, height: size.height)
+            )
+            y += size.height
+            placedVisibleSubview = true
+        }
     }
 }
 #endif

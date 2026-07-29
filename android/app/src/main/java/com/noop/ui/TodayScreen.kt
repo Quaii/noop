@@ -6053,8 +6053,9 @@ private fun KeyMetricsEditorDialog(
                     TextButton(
                         onClick = {
                             shown.clear()
-                            shown.addAll(KeyMetric.defaultOrder)
+                            shown.addAll(KeyMetric.defaultSelection)
                             hidden.clear()
+                            hidden.addAll(KeyMetric.defaultOrder.filter { it !in shown })
                             detailed = false
                             windowDays = 14
                         },

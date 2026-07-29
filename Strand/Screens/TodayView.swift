@@ -202,6 +202,10 @@ struct TodayView: View {
     // Imperial/Metric display preference (D#103). Only the Weight tile carries a convertible unit here.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
     private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
+    }
     // Day-cycle scene backdrop (#698). Default ON. When the user turns it off in Settings → Appearance,
     // Today drops the SceneScreenBackground and falls back to the plain dark surfaceBase canvas. The
     // cards already sit on an opaque canvas, so readability is unchanged either way.
@@ -261,6 +265,7 @@ struct TodayView: View {
 
     // 14-day sparkline series, keyed by metric key. Loaded once in .task.
     @State private var sparks: [String: [Double]] = [:]
+    @State private var catalogKeyMetricSnapshots: [String: CatalogKeyMetricSnapshot] = [:]
     @State private var workouts: [WorkoutRow] = []
     @State private var appleDays: [AppleDaily] = []
     // Design Reset / #582, the pinned "Your cards" values (Stress / Fitness age / Vitality), surfaced
@@ -1356,6 +1361,9 @@ struct TodayView: View {
         // Reload when the data refreshes OR the selected day changes, the HR trend and Rest score are
         // day-scoped, so navigating must re-fetch them for the newly selected window.
         .task(id: TodayLoadKey(seq: repo.refreshSeq, offset: selectedDayOffset)) { await loadAll() }
+        .task(id: "catalog-\(repo.refreshSeq)-\(selectedDayOffset)-\(keyMetricsRaw)") {
+            await loadCatalogKeyMetrics()
+        }
         // #989: hydration writes don't bump refreshSeq, so the card needs its own triggers, a logged /
         // edited / deleted drink (hydrationSeq) and the Settings feature toggle both re-read just the two
         // hydration fields. Cheap (one metricSeries row), never re-runs the heavy loads.
@@ -3456,6 +3464,27 @@ struct TodayView: View {
                 sparkline: sparks["active_kcal"],
                 sparkColor: StrandPalette.metricAmber
             )
+        case .catalog:
+            if let descriptor = metric.catalogDescriptor {
+                let snapshot = catalogKeyMetricSnapshots[metric.rawValue]
+                StatTile(
+                    label: LocalizedStringKey(descriptor.title),
+                    value: snapshot?.value.map {
+                        descriptor.format(
+                            $0,
+                            system: unitSystem,
+                            temperature: temperatureUnit,
+                            effortScale: effortScale
+                        )
+                    } ?? "—",
+                    caption: descriptor.sourceLabel,
+                    accent: snapshot?.value == nil
+                        ? StrandPalette.textPrimary
+                        : descriptor.todayTileTint,
+                    sparkline: snapshot?.points.map(\.value),
+                    sparkColor: descriptor.todayTileTint
+                )
+            }
         }
     }
 
@@ -4188,6 +4217,45 @@ struct TodayView: View {
         let all = await repo.series(key: key, source: source, days: window + 1)   // windowed, asc
         guard !all.isEmpty else { return [] }
         return trailingWindow(all, days: window).map { $0.value }
+    }
+
+    /// The extended picker is catalogue-backed, but Today only reads entries the user actually enabled.
+    /// Values and trend points use Metric Explorer's source-aware resolver, so a tile and its detail page
+    /// cannot disagree about which series they represent.
+    private func loadCatalogKeyMetrics() async {
+        let selected = enabledKeyMetrics.filter { $0.catalogDescriptor != nil }
+        guard !selected.isEmpty else {
+            catalogKeyMetricSnapshots = [:]
+            return
+        }
+
+        let calendar = Calendar.current
+        let selectedStart = calendar.startOfDay(for: selectedLogicalDay)
+        let cutoff = Repository.localDayKey(
+            calendar.date(byAdding: .day, value: -13, to: selectedStart) ?? selectedStart
+        )
+        let readDays = max(16, selectedDayOffset + 16)
+        var loaded: [String: CatalogKeyMetricSnapshot] = [:]
+
+        for metric in selected {
+            guard !Task.isCancelled, let descriptor = metric.catalogDescriptor else { return }
+            let series = await repo.exploreSeries(
+                key: descriptor.key,
+                source: descriptor.source,
+                days: readDays
+            )
+            let throughSelectedDay = series.filter { $0.day <= selectedDayKey }
+            let points = throughSelectedDay
+                .filter { $0.day >= cutoff }
+                .map { CatalogKeyMetricSnapshot.Point(day: $0.day, value: $0.value) }
+            loaded[metric.rawValue] = CatalogKeyMetricSnapshot(
+                value: throughSelectedDay.last?.value,
+                points: points
+            )
+        }
+
+        guard !Task.isCancelled else { return }
+        catalogKeyMetricSnapshots = loaded
     }
 
     /// Keep only points within the trailing `days` CALENDAR days ending TODAY (the phone's local date).

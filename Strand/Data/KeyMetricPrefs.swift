@@ -4,18 +4,21 @@ import SwiftUI
 // MARK: - Editable Key-Metrics layout (#251)
 //
 // The Today screen's "Key Metrics" grid was a fixed list of ten tiles in one order. This lets the user
-// choose WHICH tiles show and in WHAT order, with the default being the original order so nothing changes
-// for anyone who never opens the editor. Persistence is display-only — no metric is computed or stored
-// differently; this just decides which of the already-computed tiles render and in what sequence.
+// choose WHICH tiles show and in WHAT order. The complete catalogue retains the original order, while
+// fresh installs omit the three score tiles already represented by the Charge / Effort / Rest hero and
+// the optional Weight tile. Persistence is display-only — no metric is computed or stored differently;
+// this just decides which of the already-computed tiles render and in what sequence.
 //
 // Stored as a single comma-joined string of metric keys in @AppStorage (UserDefaults), the same
-// mechanism every other macOS NOOP preference uses. The Android side mirrors this exactly in
-// KeyMetricPrefs.kt (SharedPreferences "today.keyMetrics"). Unknown keys are dropped on read and any
-// known key missing from the saved list is appended (disabled) so a future tile addition can't be lost.
+// mechanism every other macOS NOOP preference uses. Android shares the preference key and the original
+// Today-tile identifiers; source-qualified catalog entries are additive on Apple platforms and degrade as
+// unknown entries on older clients. Unknown keys are dropped on read, while every known choice remains
+// available in the editor's disabled list so a future tile addition can't be lost.
 
-/// One of the Today screen's Key-Metric tiles. The rawValue is the stable persisted identifier — keep it
-/// byte-identical to the Android `KeyMetric` enum so a backup/restore reads the same layout on either OS.
-enum KeyMetric: String, CaseIterable, Identifiable, Hashable {
+/// One of the Today screen's Key-Metric tiles. The original cases retain their byte-identical persisted
+/// identifiers. Catalog-backed entries use `catalog:<source>:<key>`, which keeps metrics with the same key
+/// from different sources distinct and lets the editor expose the same catalogue as Metric Explorer.
+enum KeyMetric: CaseIterable, Identifiable, Hashable {
     case charge
     case effort
     case rest
@@ -26,8 +29,46 @@ enum KeyMetric: String, CaseIterable, Identifiable, Hashable {
     case steps
     case weight
     case calories
+    case catalog(String)
 
     var id: String { rawValue }
+
+    var rawValue: String {
+        switch self {
+        case .charge:      return "charge"
+        case .effort:      return "effort"
+        case .rest:        return "rest"
+        case .hrv:         return "hrv"
+        case .restingHr:   return "restingHr"
+        case .bloodOxygen: return "bloodOxygen"
+        case .respiratory: return "respiratory"
+        case .steps:       return "steps"
+        case .weight:      return "weight"
+        case .calories:    return "calories"
+        case .catalog(let descriptorID): return "catalog:\(descriptorID)"
+        }
+    }
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "charge":      self = .charge
+        case "effort":      self = .effort
+        case "rest":        self = .rest
+        case "hrv":         self = .hrv
+        case "restingHr":   self = .restingHr
+        case "bloodOxygen": self = .bloodOxygen
+        case "respiratory": self = .respiratory
+        case "steps":       self = .steps
+        case "weight":      self = .weight
+        case "calories":    self = .calories
+        default:
+            let prefix = "catalog:"
+            guard rawValue.hasPrefix(prefix) else { return nil }
+            let descriptorID = String(rawValue.dropFirst(prefix.count))
+            guard MetricCatalog.all.contains(where: { $0.id == descriptorID }) else { return nil }
+            self = .catalog(descriptorID)
+        }
+    }
 
     /// The tile's display label — matches the `StatTile(label:)` text rendered on the grid.
     var title: String {
@@ -42,18 +83,67 @@ enum KeyMetric: String, CaseIterable, Identifiable, Hashable {
         case .steps:       return String(localized: "Steps")
         case .weight:      return String(localized: "Weight")
         case .calories:    return String(localized: "Calories")
+        case .catalog:     return catalogDescriptor?.title ?? rawValue
         }
     }
 
-    /// The original, hard-coded grid order — the default when the user hasn't customised the layout.
+    var catalogDescriptor: MetricDescriptor? {
+        guard case .catalog(let descriptorID) = self else { return nil }
+        return MetricCatalog.all.first { $0.id == descriptorID }
+    }
+
+    /// Catalog entries already represented by a purpose-built Today tile are omitted. Those tiles carry
+    /// Today-specific source precedence and empty-state behavior; listing them again would create duplicate
+    /// choices that could disagree with each other.
+    private static let purposeBuiltDescriptorIDs: Set<String> = [
+        "my-whoop:recovery",
+        "my-whoop:strain",
+        "my-whoop:sleep_performance",
+        "my-whoop:hrv",
+        "my-whoop:rhr",
+        "my-whoop:spo2",
+        "my-whoop:resp_rate",
+        "my-whoop:steps",
+        "apple-health:steps",
+        "my-whoop:steps_est",
+        "apple-health:weight",
+        "my-whoop:energy_kcal",
+        "apple-health:active_kcal",
+    ]
+
+    static let catalogOptions: [KeyMetric] = MetricCatalog.all.compactMap { descriptor in
+        guard !purposeBuiltDescriptorIDs.contains(descriptor.id) else { return nil }
+        return .catalog(descriptor.id)
+    }
+
+    /// The complete picker catalogue: the original purpose-built Today tiles followed by every remaining
+    /// Metric Explorer entry in its canonical category order.
     static let defaultOrder: [KeyMetric] = [
         .charge, .effort, .rest, .hrv, .restingHr,
         .bloodOxygen, .respiratory, .steps, .weight, .calories,
+    ] + catalogOptions
+
+    /// The fresh-install selection. Score tiles and Weight stay available in the editor, but start hidden
+    /// until a user explicitly adds them.
+    static let defaultSelection: [KeyMetric] = [
+        .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .calories,
     ]
+
+    static var allCases: [KeyMetric] { defaultOrder }
+}
+
+struct CatalogKeyMetricSnapshot {
+    struct Point {
+        let day: String
+        let value: Double
+    }
+
+    let value: Double?
+    let points: [Point]
 }
 
 /// Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of the enabled tiles; a
-/// tile not in the list is hidden. Mirrors the macOS @AppStorage("today.keyMetrics") + Android side.
+/// tile not in the list is hidden. The original identifiers mirror Android's preference representation.
 enum KeyMetricPrefs {
     /// UserDefaults key — a comma-joined list of `KeyMetric` rawValues in display order.
     static let layoutKey = "today.keyMetrics"
@@ -64,11 +154,11 @@ enum KeyMetricPrefs {
     }
 
     /// Decode the stored string into an ordered list of enabled tiles. An empty/unset string yields the
-    /// full default order (so a fresh install shows every tile). Unknown tokens are ignored; this returns
-    /// ONLY the enabled tiles in their saved order — the editor pairs it with the disabled remainder.
+    /// fresh-install selection. Unknown tokens are ignored; this returns ONLY the enabled tiles in their
+    /// saved order — the editor pairs it with the disabled remainder.
     static func decodeEnabled(_ raw: String) -> [KeyMetric] {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return KeyMetric.defaultOrder }
+        guard !trimmed.isEmpty else { return KeyMetric.defaultSelection }
         var seen = Set<KeyMetric>()
         var result: [KeyMetric] = []
         for token in trimmed.split(separator: ",") {
@@ -76,6 +166,6 @@ enum KeyMetricPrefs {
                 result.append(m)
             }
         }
-        return result
+        return result.isEmpty ? KeyMetric.defaultSelection : result
     }
 }

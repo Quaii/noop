@@ -8,6 +8,7 @@ where Item: Identifiable & Equatable, Options: View {
 
     let shownTitle: String
     let hiddenTitle: String
+    let hiddenGroupTitle: (Item) -> String?
     let title: (Item) -> String
     let subtitle: (Item) -> String?
     let icon: (Item) -> String
@@ -45,32 +46,41 @@ where Item: Identifiable & Equatable, Options: View {
                     .foregroundStyle(StrandPalette.textTertiary)
             }
 
-            Section {
-                if draft.hidden.isEmpty {
+            if draft.hidden.isEmpty {
+                Section {
                     Text("Nothing hidden")
                         .foregroundStyle(StrandPalette.textTertiary)
-                } else {
-                    ForEach(draft.hidden) { item in
-                        EditableLayoutRow(
-                            title: title(item),
-                            subtitle: subtitle(item),
-                            icon: icon(item),
-                            tint: tint(item),
-                            configurationLabel: configurationLabel(item),
-                            isVisible: false,
-                            canHide: true,
-                            onConfigure: { onConfigure(item) },
-                            onVisibilityChange: { show(item) }
-                        )
+                } header: {
+                    Text(hiddenTitle)
+                        .strandOverline()
+                } footer: {
+                    hiddenFooter
+                }
+            } else {
+                ForEach(Array(groupedHiddenItems.enumerated()), id: \.offset) { index, group in
+                    Section {
+                        ForEach(group.items) { item in
+                            EditableLayoutRow(
+                                title: title(item),
+                                subtitle: subtitle(item),
+                                icon: icon(item),
+                                tint: tint(item),
+                                configurationLabel: configurationLabel(item),
+                                isVisible: false,
+                                canHide: true,
+                                onConfigure: { onConfigure(item) },
+                                onVisibilityChange: { show(item) }
+                            )
+                        }
+                    } header: {
+                        Text(group.title.map { "\(hiddenTitle) · \($0)" } ?? hiddenTitle)
+                            .strandOverline()
+                    } footer: {
+                        if index == groupedHiddenItems.count - 1 {
+                            hiddenFooter
+                        }
                     }
                 }
-            } header: {
-                Text(hiddenTitle)
-                    .strandOverline()
-            } footer: {
-                Text("Hidden items remain available here and can be restored at any time.")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
             }
 
             Section {
@@ -90,6 +100,25 @@ where Item: Identifiable & Equatable, Options: View {
         #if os(iOS)
         .environment(\.editMode, .constant(.active))
         #endif
+    }
+
+    private var groupedHiddenItems: [(title: String?, items: [Item])] {
+        var groups: [(title: String?, items: [Item])] = []
+        for item in draft.hidden {
+            let groupTitle = hiddenGroupTitle(item)
+            if let index = groups.firstIndex(where: { $0.title == groupTitle }) {
+                groups[index].items.append(item)
+            } else {
+                groups.append((title: groupTitle, items: [item]))
+            }
+        }
+        return groups
+    }
+
+    private var hiddenFooter: some View {
+        Text("Hidden items remain available here and can be restored at any time.")
+            .font(StrandFont.footnote)
+            .foregroundStyle(StrandPalette.textTertiary)
     }
 
     private func moveVisible(from offsets: IndexSet, to destination: Int) {

@@ -76,6 +76,7 @@ struct LiquidTodayView: View {
     /// loader banks a day-keyed 14-day superset; render filters down, so a window change applies instantly.
     @AppStorage("today.keyMetricsWindowDays") private var keyMetricsWindowDays = 14
     @State private var kSparks: [String: [(String, Double)]] = [:]
+    @State private var catalogKeyMetricSnapshots: [String: CatalogKeyMetricSnapshot] = [:]
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
 
     // day navigation (0 = today, 1 = yesterday, …)
@@ -260,7 +261,8 @@ struct LiquidTodayView: View {
                         orderRaw: $sectionOrderRaw,
                         editing: $todayLayoutEditing,
                         sections: sectionOrder,
-                        coordinateSpace: Self.pullSpace
+                        coordinateSpace: Self.pullSpace,
+                        onRemove: hideTodaySection
                     ) { section in
                         todaySection(section)
                     }
@@ -318,6 +320,9 @@ struct LiquidTodayView: View {
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
         .task(id: "\(repo.refreshSeq)-\(selectedDayOffset)") { await load() }
+        .task(id: "catalog-\(repo.refreshSeq)-\(selectedDayOffset)-\(keyMetricsRaw)") {
+            await loadCatalogKeyMetrics()
+        }
         .sheet(item: $guideSection) { section in
             NavigationStack { ScoringGuideView(initialSection: section, onClose: { guideSection = nil }) }
         }
@@ -435,6 +440,13 @@ struct LiquidTodayView: View {
                 HStack(spacing: NoopMetrics.space2) {
                     #if os(iOS)
                     if todayLayoutEditing {
+                        todayEditIconControl(
+                            "plus",
+                            accessibilityLabel: "Customize Today"
+                        ) {
+                            StrandHaptic.selection.play()
+                            customizationDestination = .today
+                        }
                         todayEditControl("Reset", tint: StrandPalette.onDarkSecondary) {
                             StrandHaptic.selection.play()
                             let enabledMetrics = Set(KeyMetricPrefs.decodeEnabled(keyMetricsRaw))
@@ -509,17 +521,6 @@ struct LiquidTodayView: View {
         // this leaf so the Today root still does not redraw on every heart-rate notification.
         LiquidSyncChip()
         LiquidBatteryButton()
-        // The unified sheet owns visibility and detailed nested options. Direct edit mode complements it
-        // with in-place ordering rather than replacing it with another layout model.
-        Button { customizationDestination = .today } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(.white.opacity(0.16)))
-        }
-        .buttonStyle(LiquidPressStyle())
-        .accessibilityLabel("Customize Today")
     }
 
     #if os(iOS)
@@ -540,7 +541,49 @@ struct LiquidTodayView: View {
         }
         .buttonStyle(LiquidPressStyle())
     }
+
+    private func todayEditIconControl(
+        _ systemImage: String,
+        accessibilityLabel: LocalizedStringKey,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(StrandPalette.onDarkPrimary)
+                .frame(
+                    width: NoopMetrics.space8,
+                    height: NoopMetrics.space8
+                )
+                .background(StrandPalette.onDarkPrimary.opacity(0.16), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityLabel(accessibilityLabel)
+    }
     #endif
+
+    private func hideTodaySection(_ section: TodaySection) {
+        guard sectionOrder.count > 1 else { return }
+        var hidden = TodayLayoutPrefs.decodeHidden(hiddenSectionsRaw)
+        guard !hidden.contains(section) else { return }
+        hidden.append(section)
+        hiddenSectionsRaw = TodayLayoutPrefs.encodeHidden(hidden)
+    }
+
+    private func hideKeyMetric(_ metric: KeyMetric) {
+        let enabled = enabledKeyMetrics
+        guard enabled.count > 1 else { return }
+        keyMetricsRaw = KeyMetricPrefs.encode(enabled.filter { $0 != metric })
+    }
+
+    private func hideDashboardCard(_ dashboardCard: DashboardCard) {
+        let enabled = DashboardCardPrefs.decodeEnabled(dashboardCardsRaw)
+        guard enabled.count > 1 else { return }
+        dashboardCardsRaw = DashboardCardPrefs.encode(
+            enabled.filter { $0 != dashboardCard }
+        )
+    }
 
     /// One-tap Live Session start (silent guardian, beta) — sits directly under the hero scores, the
     /// Charge its band is gated on. Same translucent chrome as the hero card so it reads as part of the
@@ -570,10 +613,18 @@ struct LiquidTodayView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: NoopMetrics.TodayCard.compactRadius,
+                    style: .continuous
+                )
                     .fill(heroFill)
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(0.11), lineWidth: 1))
+                    .overlay(
+                        RoundedRectangle(
+                            cornerRadius: NoopMetrics.TodayCard.compactRadius,
+                            style: .continuous
+                        )
+                        .strokeBorder(.white.opacity(0.11), lineWidth: 1)
+                    )
                     .opacity(cardOpacity)
             )
         }
@@ -616,10 +667,18 @@ struct LiquidTodayView: View {
         .padding(.vertical, NoopMetrics.space4)
         .padding(.horizontal, NoopMetrics.space3)
         .background(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
+            RoundedRectangle(
+                cornerRadius: NoopMetrics.TodayCard.heroRadius,
+                style: .continuous
+            )
                 .fill(heroFill)
-                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(.white.opacity(0.11), lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: NoopMetrics.TodayCard.heroRadius,
+                        style: .continuous
+                    )
+                    .strokeBorder(.white.opacity(0.11), lineWidth: 1)
+                )
                 .shadow(color: .black.opacity(0.6), radius: 30, y: 16)
                 .opacity(cardOpacity)
         )
@@ -687,7 +746,8 @@ struct LiquidTodayView: View {
                 spacing: NoopMetrics.space2,
                 coordinateSpace: Self.pullSpace,
                 accessibilityLabel: { $0.title },
-                onMove: { dashboardCardsRaw = DashboardCardPrefs.encode($0) }
+                onMove: { dashboardCardsRaw = DashboardCardPrefs.encode($0) },
+                onRemove: hideDashboardCard
             ) { card in
                 liquidCard(for: card)
             }
@@ -777,10 +837,18 @@ struct LiquidTodayView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: NoopMetrics.TodayCard.compactRadius,
+                    style: .continuous
+                )
                     .fill(StrandPalette.surfaceRaised)
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+                    .overlay(
+                        RoundedRectangle(
+                            cornerRadius: NoopMetrics.TodayCard.compactRadius,
+                            style: .continuous
+                        )
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 1)
+                    )
                     .opacity(cardOpacity)
             )
         }
@@ -879,22 +947,17 @@ struct LiquidTodayView: View {
         let hrv = displayDay?.avgHrv ?? vitalsDay?.avgHrv
         let rhr = (displayDay?.restingHr ?? vitalsDay?.restingHr).map(Double.init)
         let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
-        return card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("RECOVERY VITALS").font(StrandFont.overline).tracking(1.6)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                    Spacer()
-                    if let line = vitalsProvenanceLine {
-                        Text(line).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
-                    }
+        return VStack(spacing: 8) {
+            sectionHead("RECOVERY VITALS", trailing: vitalsProvenanceLine ?? "")
+            card {
+                VStack(alignment: .leading, spacing: 12) {
+                    vitalRow(String(localized: "Heart-rate variability"), unitText(hrv, "ms"),
+                             StrandPalette.metricCyan, fracOver(hrv, 120))
+                    vitalRow(String(localized: "Resting heart rate"), unitText(rhr, "bpm"),
+                             StrandPalette.metricRose, fracOver(rhr, 100))
+                    vitalRow(String(localized: "Breaths per minute"), unitText(resp, "rpm", decimals: 1),
+                             StrandPalette.accent, fracOver(resp, 24))
                 }
-                vitalRow(String(localized: "Heart-rate variability"), unitText(hrv, "ms"),
-                         StrandPalette.metricCyan, fracOver(hrv, 120))
-                vitalRow(String(localized: "Resting heart rate"), unitText(rhr, "bpm"),
-                         StrandPalette.metricRose, fracOver(rhr, 100))
-                vitalRow(String(localized: "Breaths per minute"), unitText(resp, "rpm", decimals: 1),
-                         StrandPalette.accent, fracOver(resp, 24))
             }
         }
     }
@@ -924,6 +987,11 @@ struct LiquidTodayView: View {
     private func windowedSpark(_ key: String) -> [Double] {
         let cutoff = sparkWindowCutoffKey
         return (kSparks[key] ?? []).filter { $0.0 >= cutoff }.map { $0.1 }
+    }
+
+    private func windowedSpark(_ rows: [(String, Double)]) -> [Double] {
+        let cutoff = sparkWindowCutoffKey
+        return rows.filter { $0.0 >= cutoff }.map { $0.1 }
     }
 
     /// The Key-Metrics header's trailing label for the chosen detailed-graph window (Android twin).
@@ -968,7 +1036,8 @@ struct LiquidTodayView: View {
                 spacing: NoopMetrics.space2,
                 coordinateSpace: Self.pullSpace,
                 accessibilityLabel: { $0.title },
-                onMove: { keyMetricsRaw = KeyMetricPrefs.encode($0) }
+                onMove: { keyMetricsRaw = KeyMetricPrefs.encode($0) },
+                onRemove: hideKeyMetric
             ) { metric in
                 ktileFor(metric, hrv: hrv, rhr: rhr)
             }
@@ -1025,11 +1094,36 @@ struct LiquidTodayView: View {
             // detail source, so the number, its sparkline and the chart it opens all agree.
             ktile(String(localized: "Calories"), intText(caloriesCount), "kcal", StrandPalette.metricAmber,
                   fracOver(caloriesCount, 800), key: "energy_kcal", detailMetric: caloriesDetailMetric)
+        case .catalog:
+            if let descriptor = metric.catalogDescriptor {
+                let snapshot = catalogKeyMetricSnapshots[metric.rawValue]
+                let value = snapshot?.value
+                ktile(
+                    descriptor.title,
+                    value.map { descriptor.format(
+                        $0,
+                        system: unitSystem,
+                        temperature: temperatureUnit,
+                        effortScale: effortScale
+                    ) } ?? "—",
+                    "",
+                    descriptor.todayTileTint,
+                    value.flatMap {
+                        descriptor.todayGaugeFraction(
+                            value: $0,
+                            points: snapshot?.points ?? []
+                        )
+                    },
+                    detailMetric: descriptor,
+                    sparkRows: snapshot?.points.map { ($0.day, $0.value) }
+                )
+            }
         }
     }
 
     private func ktile(_ label: String, _ value: String, _ unit: String, _ tint: Color, _ frac: Double?,
-                       key: String? = nil, detailMetric: MetricDescriptor? = nil) -> some View {
+                       key: String? = nil, detailMetric: MetricDescriptor? = nil,
+                       sparkRows: [(String, Double)]? = nil) -> some View {
         let tile = VStack(alignment: .leading, spacing: 6) {
             Text(label.uppercased()).font(StrandFont.overlineScaled(9)).tracking(1.2)
                 .foregroundStyle(StrandPalette.textTertiary)
@@ -1044,7 +1138,9 @@ struct LiquidTodayView: View {
             // windowed series keeps a clear placeholder of the same height so every tile in a detailed row
             // stays equal-height with its bars aligned.
             if keyMetricsDetailed {
-                let spark = key.map { windowedSpark($0) } ?? []
+                let spark = sparkRows.map(windowedSpark)
+                    ?? key.map { windowedSpark($0) }
+                    ?? []
                 if spark.count >= 2 {
                     Sparkline(values: spark,
                               gradient: Gradient(colors: [tint.opacity(0.5), tint]))
@@ -1060,10 +1156,18 @@ struct LiquidTodayView: View {
         .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(
+                cornerRadius: NoopMetrics.TodayCard.tileRadius,
+                style: .continuous
+            )
                 .fill(StrandPalette.surfaceRaised)
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: NoopMetrics.TodayCard.tileRadius,
+                        style: .continuous
+                    )
+                    .strokeBorder(StrandPalette.hairline, lineWidth: 1)
+                )
                 .opacity(cardOpacity)
         )
         // #430 parity: tap -> the metric's trend detail (the same Explore dossier its MetricRow pushes,
@@ -1080,6 +1184,45 @@ struct LiquidTodayView: View {
         }
     }
 
+    /// Loads only catalog metrics the user actually added. Hidden choices cost nothing; visible choices
+    /// resolve through the same source-aware series path as Metric Explorer and retain day keys for the
+    /// configurable detailed-tile window.
+    private func loadCatalogKeyMetrics() async {
+        let selected = enabledKeyMetrics.filter { $0.catalogDescriptor != nil }
+        guard !selected.isEmpty else {
+            catalogKeyMetricSnapshots = [:]
+            return
+        }
+
+        let calendar = Calendar.current
+        let selectedStart = calendar.startOfDay(for: selectedLogicalDay)
+        let cutoff = Repository.localDayKey(
+            calendar.date(byAdding: .day, value: -13, to: selectedStart) ?? selectedStart
+        )
+        let readDays = max(16, selectedDayOffset + 16)
+        var loaded: [String: CatalogKeyMetricSnapshot] = [:]
+
+        for metric in selected {
+            guard !Task.isCancelled, let descriptor = metric.catalogDescriptor else { return }
+            let series = await repo.exploreSeries(
+                key: descriptor.key,
+                source: descriptor.source,
+                days: readDays
+            )
+            let throughSelectedDay = series.filter { $0.day <= selectedDayKey }
+            let points = throughSelectedDay
+                .filter { $0.day >= cutoff }
+                .map { CatalogKeyMetricSnapshot.Point(day: $0.day, value: $0.value) }
+            loaded[metric.rawValue] = CatalogKeyMetricSnapshot(
+                value: throughSelectedDay.last?.value,
+                points: points
+            )
+        }
+
+        guard !Task.isCancelled else { return }
+        catalogKeyMetricSnapshots = loaded
+    }
+
     // MARK: - Last workouts
 
     private var lastWorkoutsSection: some View {
@@ -1089,7 +1232,7 @@ struct LiquidTodayView: View {
                 NavigationLink(value: TabRoute.workouts) { workoutCard(w) }
                     .buttonStyle(LiquidPressStyle())
             } else {
-                card {
+                card(cornerRadius: NoopMetrics.TodayCard.compactRadius) {
                     Text("No workouts yet")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -1100,7 +1243,7 @@ struct LiquidTodayView: View {
     }
 
     private func workoutCard(_ w: WorkoutRow) -> some View {
-        card {
+        card(cornerRadius: NoopMetrics.TodayCard.tileRadius) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -1124,7 +1267,7 @@ struct LiquidTodayView: View {
         VStack(spacing: 8) {
             sectionHead("DATA SOURCES", trailing: "Provenance")
             NavigationLink(value: TabRoute.dataSources) {
-                card {
+                card(cornerRadius: NoopMetrics.TodayCard.compactRadius) {
                     VStack(spacing: 12) {
                         HStack {
                             Text("Synced from").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
@@ -1141,6 +1284,20 @@ struct LiquidTodayView: View {
                 }
             }
             .buttonStyle(LiquidPressStyle())
+            customizeTodayButton
+        }
+    }
+
+    /// The persistent entry point for visibility and nested options now lives with the rest of the
+    /// Today content rather than competing with live status controls in the compact sky header.
+    private var customizeTodayButton: some View {
+        NoopButton(
+            "Customize Today",
+            systemImage: "slider.horizontal.3",
+            kind: .secondary,
+            fullWidth: true
+        ) {
+            customizationDestination = .today
         }
     }
 
@@ -1156,14 +1313,17 @@ struct LiquidTodayView: View {
         .padding(.top, 4)
     }
 
-    private func card<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+    private func card<V: View>(
+        cornerRadius: CGFloat = NoopMetrics.TodayCard.standardRadius,
+        @ViewBuilder _ content: () -> V
+    ) -> some View {
         content()
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(StrandPalette.surfaceRaised)
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .strokeBorder(StrandPalette.hairline, lineWidth: 1))
                     .opacity(cardOpacity)
             )
@@ -1464,6 +1624,12 @@ struct LiquidTodayView: View {
     // preference the Workouts screen + Trends read, so a workout's Effort number is identical everywhere.
     @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
+    }
 
     private func effortText(_ s: Double?) -> String {
         guard let s else { return "–" }

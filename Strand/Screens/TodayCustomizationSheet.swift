@@ -174,7 +174,7 @@ struct TodayCustomizationSheet: View {
             )
         case .keyMetrics:
             keyMetricDraft = EditableLayoutDraft(
-                visible: KeyMetric.defaultOrder,
+                visible: KeyMetric.defaultSelection,
                 allItems: KeyMetric.defaultOrder
             )
             detailed = false
@@ -228,6 +228,7 @@ private struct TodaySectionsCustomizationPage: View {
             draft: $draft,
             shownTitle: String(localized: "Shown on Today"),
             hiddenTitle: String(localized: "Hidden"),
+            hiddenGroupTitle: { _ in nil },
             title: \.title,
             subtitle: subtitle,
             icon: \.customizationIcon,
@@ -275,9 +276,10 @@ private struct KeyMetricsCustomizationPage: View {
         EditableLayoutList(
             draft: $draft,
             shownTitle: String(localized: "Shown"),
-            hiddenTitle: String(localized: "Hidden"),
+            hiddenTitle: String(localized: "Available"),
+            hiddenGroupTitle: \.customizationSourceGroup,
             title: \.title,
-            subtitle: { _ in nil },
+            subtitle: \.customizationSubtitle,
             icon: \.customizationIcon,
             tint: \.customizationTint,
             configurationLabel: { _ in nil },
@@ -321,6 +323,7 @@ private struct DashboardCardsCustomizationPage: View {
             draft: $draft,
             shownTitle: String(localized: "Shown"),
             hiddenTitle: String(localized: "Hidden"),
+            hiddenGroupTitle: { _ in nil },
             title: \.title,
             subtitle: \.subtitle,
             icon: \.icon,
