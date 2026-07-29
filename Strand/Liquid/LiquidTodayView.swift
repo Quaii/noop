@@ -359,6 +359,11 @@ struct LiquidTodayView: View {
         .onChange(of: scrollToTopSignal) { _, _ in
             withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(Self.topAnchorID, anchor: .top) }
         }
+        // Defensive counterpart to the gesture priority below: if a navigation transition ever wins the
+        // same release as edit activation, returning to Today must still start from an idle editor.
+        .onAppear {
+            todayEditScope = .inactive
+        }
         // Match home-screen editing: leaving Today ends the editing session, while ordinary data
         // refreshes inside Today do not. The child reorder wrapper only cancels an in-flight drag.
         .onDisappear {

@@ -130,7 +130,10 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
             reorderGesture(for: item),
             including: editing ? .all : .none
         )
-        .simultaneousGesture(
+        // This must outrank the tile's NavigationLink tap. With a simultaneous recognizer, the release
+        // that completed a long press could also activate the link, leaving edit mode behind the pushed
+        // screen. A short tap still falls through normally after the long press fails.
+        .highPriorityGesture(
             LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
                 .onEnded { _ in beginEditing() },
             including: editScope.isActive ? .none : .all

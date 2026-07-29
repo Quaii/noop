@@ -128,7 +128,9 @@ struct TodayReorderableSections<Content: View>: View {
             reorderGesture(for: section),
             including: editingSections && !hasInlineItems ? .all : .none
         )
-        .simultaneousGesture(
+        // Give edit activation priority over any NavigationLink inside the section. Otherwise one release
+        // can both enter jiggle mode and push the card's destination.
+        .highPriorityGesture(
             LongPressGesture(minimumDuration: StrandMotion.editHoldDuration)
                 .onEnded { _ in beginEditing() },
             including: !editScope.isActive && !hasInlineItems ? .all : .none
