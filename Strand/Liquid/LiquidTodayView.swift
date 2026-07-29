@@ -53,6 +53,7 @@ struct LiquidTodayView: View {
     @State private var showSettings = false
     @State private var synthesisExpanded = false
     @State private var showLiveSession = false
+    @State private var showRecoveryVitalsHideChoice = false
 
     /// Live Sessions (silent guardian) beta gate — the SAME key the Settings toggle writes. Default ON
     /// (the entry is BETA-labelled in-UI); off removes the Start-session control entirely.
@@ -338,6 +339,25 @@ struct LiquidTodayView: View {
                 dashboardCardsRaw: $dashboardCardsRaw
             )
         }
+        #if os(iOS)
+        .confirmationDialog(
+            "Hide Recovery Vitals?",
+            isPresented: $showRecoveryVitalsHideChoice,
+            titleVisibility: .visible
+        ) {
+            Button("Add missing vitals to Key Metrics") {
+                hideRecoveryVitals(keepingIndividualTiles: true)
+            }
+            Button("Hide without adding them", role: .destructive) {
+                hideRecoveryVitals(keepingIndividualTiles: false)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Recovery Vitals groups HRV, Resting HR, and Respiratory Rate. Choose whether those measurements should remain on Today as individual tiles."
+            )
+        }
+        #endif
         .sheet(isPresented: $showSettings) {
             NavigationStack {
                 SettingsView()
@@ -581,10 +601,29 @@ struct LiquidTodayView: View {
 
     private func hideTodaySection(_ section: TodaySection) {
         guard sectionOrder.count > 1 else { return }
+        if section == .recoveryVitals {
+            showRecoveryVitalsHideChoice = true
+            return
+        }
+        commitHideTodaySection(section)
+    }
+
+    private func commitHideTodaySection(_ section: TodaySection) {
         var hidden = TodayLayoutPrefs.decodeHidden(hiddenSectionsRaw)
         guard !hidden.contains(section) else { return }
         hidden.append(section)
         hiddenSectionsRaw = TodayLayoutPrefs.encodeHidden(hidden)
+    }
+
+    private func hideRecoveryVitals(keepingIndividualTiles: Bool) {
+        if keepingIndividualTiles {
+            let enabled = TodayComponentRegistry.keyMetricsKeepingRecoveryVitals(enabledKeyMetrics)
+            keyMetricsRaw = KeyMetricPrefs.encode(enabled)
+            var hidden = TodayLayoutPrefs.decodeHidden(hiddenSectionsRaw)
+            hidden.removeAll { $0 == .keyMetrics }
+            hiddenSectionsRaw = TodayLayoutPrefs.encodeHidden(hidden)
+        }
+        commitHideTodaySection(.recoveryVitals)
     }
 
     private func hideKeyMetric(_ metric: KeyMetric) {
@@ -1032,6 +1071,7 @@ struct LiquidTodayView: View {
         // today's own (they are scored surfaces).
         let hrv = displayDay?.avgHrv ?? vitalsDay?.avgHrv
         let rhr = (displayDay?.restingHr ?? vitalsDay?.restingHr).map(Double.init)
+        let columnCount = KeyMetricGridLayout.columnCount(itemCount: enabledKeyMetrics.count)
         return VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 sectionHead("KEY METRICS", trailing: trendWindowLabel)
@@ -1063,7 +1103,7 @@ struct LiquidTodayView: View {
                 items: enabledKeyMetrics,
                 columns: Array(
                     repeating: GridItem(.flexible(), spacing: NoopMetrics.space2),
-                    count: 3
+                    count: columnCount
                 ),
                 spacing: NoopMetrics.space2,
                 coordinateSpace: Self.pullSpace,
@@ -1074,7 +1114,10 @@ struct LiquidTodayView: View {
                 ktileFor(metric, hrv: hrv, rhr: rhr)
             }
             #else
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount),
+                spacing: 8
+            ) {
                 ForEach(enabledKeyMetrics) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
                 }

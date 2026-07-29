@@ -119,17 +119,136 @@ final class TodayLayoutPrefsTests: XCTestCase {
         XCTAssertEqual(draft.visible, [.hrv])
     }
 
-    func testFreshKeyMetricsHideDuplicatedScoreTilesByDefault() {
+    func testFreshKeyMetricsHideValuesAlreadyOwnedByHeroAndRecoveryVitals() {
         XCTAssertEqual(KeyMetricPrefs.decodeEnabled(""), KeyMetric.defaultSelection)
         XCTAssertEqual(
             KeyMetric.defaultSelection,
-            [.hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .calories]
+            [.bloodOxygen, .steps, .calories]
         )
         XCTAssertFalse(KeyMetric.defaultSelection.contains(.charge))
         XCTAssertFalse(KeyMetric.defaultSelection.contains(.effort))
         XCTAssertFalse(KeyMetric.defaultSelection.contains(.rest))
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.hrv))
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.restingHr))
+        XCTAssertFalse(KeyMetric.defaultSelection.contains(.respiratory))
         XCTAssertFalse(KeyMetric.defaultSelection.contains(.weight))
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
+    }
+
+    func testFreshYourCardsContainsDerivedInsightsOnly() {
+        XCTAssertEqual(
+            DashboardCardPrefs.decodeEnabled(""),
+            [.stress, .fitnessAge, .vitality]
+        )
+        XCTAssertEqual(DashboardCard.defaultSelection, [.stress, .fitnessAge, .vitality])
+        XCTAssertEqual(
+            DashboardCard.availableSelection,
+            [.stress, .fitnessAge, .vitality, .coupled]
+        )
+        XCTAssertFalse(DashboardCard.availableSelection.contains(.hrv))
+        XCTAssertFalse(DashboardCard.availableSelection.contains(.restingHr))
+    }
+
+    func testOwnershipMigrationCleansExistingSavedSelections() {
+        XCTAssertEqual(
+            TodayComponentRegistry.keyMetricsAfterOwnershipMigration(
+                [.hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .calories]
+            ),
+            [.bloodOxygen, .steps, .calories]
+        )
+        XCTAssertEqual(
+            TodayComponentRegistry.dashboardCardsAfterOwnershipMigration(
+                [.stress, .fitnessAge, .vitality, .hrv, .restingHr]
+            ),
+            [.stress, .fitnessAge, .vitality]
+        )
+    }
+
+    func testTodayRegistryInventoriesEveryTopLevelSection() {
+        XCTAssertEqual(
+            Set(TodayComponentRegistry.sectionDeclarations.map(\.section)),
+            Set(TodaySection.allCases)
+        )
+        XCTAssertEqual(
+            TodayComponentRegistry.canonicalOwners[.restingHr],
+            .recoveryVitals
+        )
+        XCTAssertEqual(
+            TodayComponentRegistry.canonicalOwners[.steps],
+            .keyMetrics
+        )
+    }
+
+    func testCleanDefaultsHaveNoCrossSectionMetricDuplicates() {
+        XCTAssertTrue(
+            TodayComponentRegistry.duplicateMetrics(
+                visibleSections: Set(TodaySection.defaultOrder),
+                keyMetrics: KeyMetric.defaultSelection,
+                dashboardCards: DashboardCard.defaultSelection
+            ).isEmpty
+        )
+    }
+
+    func testExplicitVitalTileKeepsCompoundOwnerAndLabelsOverlap() {
+        let visibleSections = Set(TodaySection.defaultOrder)
+        XCTAssertEqual(
+            TodayComponentRegistry.sectionsRendering(
+                .restingHr,
+                visibleSections: visibleSections,
+                keyMetrics: [.restingHr],
+                dashboardCards: DashboardCard.defaultSelection
+            ),
+            [.keyMetrics, .recoveryVitals]
+        )
+        XCTAssertEqual(
+            TodayComponentRegistry.overlapLabel(
+                for: .restingHr,
+                visibleSections: visibleSections,
+                dashboardCards: DashboardCard.defaultSelection
+            ),
+            "Also in Recovery Vitals"
+        )
+    }
+
+    func testRecoveryVitalsHandoffAddsOnlyMissingTilesInStableOrder() {
+        XCTAssertEqual(
+            TodayComponentRegistry.keyMetricsKeepingRecoveryVitals(
+                [.steps, .hrv, .calories]
+            ),
+            [.steps, .hrv, .calories, .restingHr, .respiratory]
+        )
+    }
+
+    func testFourKeyMetricsUseBalancedTwoByTwoGrid() {
+        XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 1), 1)
+        XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 2), 2)
+        XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 3), 3)
+        XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 4), 2)
+        XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 5), 3)
+        XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 6), 3)
+    }
+
+    func testExternalCatalogMetricsRequireDataFromTheirExactSource() {
+        let xiaomiStress = KeyMetric.catalog("xiaomi-band:stress")
+        let whoopStress = KeyMetric.catalog("my-whoop:stress")
+        XCTAssertFalse(
+            TodayMetricSourceAvailability.isSelectable(
+                xiaomiStress,
+                availableExternalMetricIDs: []
+            )
+        )
+        XCTAssertTrue(
+            TodayMetricSourceAvailability.isSelectable(
+                xiaomiStress,
+                availableExternalMetricIDs: ["xiaomi-band:stress"]
+            )
+        )
+        XCTAssertTrue(
+            TodayMetricSourceAvailability.isSelectable(
+                whoopStress,
+                availableExternalMetricIDs: []
+            )
+        )
     }
 
     func testMetricExplorerCatalogIsAvailableToKeyMetricsAndRoundTrips() {

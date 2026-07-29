@@ -7,7 +7,8 @@ import SwiftUI
 // it into a user-customisable dashboard faithful to WHOOP's "My Dashboard": the user chooses WHICH metric
 // cards show and in WHAT order from a registry of the values Today already loads. Persistence is
 // DISPLAY-ONLY, no metric is computed or stored differently; this just decides which already-loaded
-// values render as WHOOP metric rows and in what sequence.
+// values render as WHOOP metric rows and in what sequence. New additions are derived insights rather than
+// duplicate raw vitals; a one-time ownership migration removes raw cards saved by older builds.
 //
 // Stored as a JSON-encoded [String] of card ids in @AppStorage (UserDefaults). Unknown ids are dropped on
 // read; a known id missing from the saved list is offered (disabled) in the editor so a future card can't
@@ -117,15 +118,20 @@ enum DashboardCard: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// The default set when the user hasn't customised the dashboard: the original Stress / Fitness age /
-    /// Vitality trio plus HRV + Resting HR (per the task's "sensible default"). Cards with no value yet
-    /// simply render "—", so the default set is safe on a fresh install.
+    /// The fresh-install dashboard contains derived insights only. Raw cases remain decodable for
+    /// compatibility, but the ownership migration removes them from saved Today layouts.
     static let defaultSelection: [DashboardCard] = [
-        .stress, .fitnessAge, .vitality, .hrv, .restingHr,
+        .stress, .fitnessAge, .vitality,
     ]
 
-    /// Canonical order used to list the disabled remainder in the editor.
+    /// Full decoding registry. Do not remove legacy cases from this list.
     static let canonicalOrder: [DashboardCard] = allCases
+
+    /// Cards offered for new additions. Coupled remains because it is navigation, not a raw-value repeat.
+    static let availableSelection: [DashboardCard] = [
+        .stress, .fitnessAge, .vitality, .coupled,
+    ]
+
 }
 
 /// Display-only persistence for the "Your cards" dashboard selection. Holds an ORDERED list of the enabled

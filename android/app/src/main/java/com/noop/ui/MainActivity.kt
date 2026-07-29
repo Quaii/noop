@@ -50,6 +50,8 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Load the saved "Card transparency" so every frosted card renders at the chosen opacity from launch.
         CardAppearance.init(this)
+        // Clean pre-registry Today duplicates before Compose reads its remembered preference state.
+        TodayMetricOwnershipMigration.migrateIfNeeded(this)
 
         // Demo build only: preload a full synthetic dataset so every screen is populated
         // out of the box (no strap, no import). No-op once seeded; never runs on the full app.

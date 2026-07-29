@@ -15,6 +15,8 @@ where Item: Identifiable & Equatable, Options: View {
     let tint: (Item) -> Color
     let configurationLabel: (Item) -> String?
     let onConfigure: (Item) -> Void
+    let shouldHide: (Item) -> Bool
+    let isAvailable: (Item) -> Bool
     let onReset: () -> Void
     @ViewBuilder let options: () -> Options
 
@@ -35,6 +37,9 @@ where Item: Identifiable & Equatable, Options: View {
                         onConfigure: { onConfigure(item) },
                         onVisibilityChange: { hide(item) }
                     )
+                    // A hidden row becoming shown changes identity as well as section. Rebuilding it here
+                    // avoids SwiftUI reusing the non-movable row shell without an onMove drag handle.
+                    .id("shown-\(String(describing: item.id))")
                 }
                 .onMove(perform: moveVisible)
             } header: {
@@ -46,7 +51,7 @@ where Item: Identifiable & Equatable, Options: View {
                     .foregroundStyle(StrandPalette.textTertiary)
             }
 
-            if draft.hidden.isEmpty {
+            if availableHiddenItems.isEmpty {
                 Section {
                     Text("Nothing hidden")
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -71,6 +76,7 @@ where Item: Identifiable & Equatable, Options: View {
                                 onConfigure: { onConfigure(item) },
                                 onVisibilityChange: { show(item) }
                             )
+                            .id("hidden-\(String(describing: item.id))")
                         }
                     } header: {
                         Text(group.title.map { "\(hiddenTitle) · \($0)" } ?? hiddenTitle)
@@ -104,7 +110,7 @@ where Item: Identifiable & Equatable, Options: View {
 
     private var groupedHiddenItems: [(title: String?, items: [Item])] {
         var groups: [(title: String?, items: [Item])] = []
-        for item in draft.hidden {
+        for item in availableHiddenItems {
             let groupTitle = hiddenGroupTitle(item)
             if let index = groups.firstIndex(where: { $0.title == groupTitle }) {
                 groups[index].items.append(item)
@@ -113,6 +119,10 @@ where Item: Identifiable & Equatable, Options: View {
             }
         }
         return groups
+    }
+
+    private var availableHiddenItems: [Item] {
+        draft.hidden.filter(isAvailable)
     }
 
     private var hiddenFooter: some View {
@@ -126,6 +136,7 @@ where Item: Identifiable & Equatable, Options: View {
     }
 
     private func hide(_ item: Item) {
+        guard shouldHide(item) else { return }
         withAnimation(StrandMotion.interactive) {
             draft.hide(item)
         }

@@ -5,8 +5,8 @@ import SwiftUI
 //
 // The Today screen's "Key Metrics" grid was a fixed list of ten tiles in one order. This lets the user
 // choose WHICH tiles show and in WHAT order. The complete catalogue retains the original order, while
-// fresh installs omit the three score tiles already represented by the Charge / Effort / Rest hero and
-// the optional Weight tile. Persistence is display-only — no metric is computed or stored differently;
+// fresh installs omit the scores already represented by the Charge / Effort / Rest hero, the measurements
+// already represented by Recovery Vitals, and the optional Weight tile. Persistence is display-only;
 // this just decides which of the already-computed tiles render and in what sequence.
 //
 // Stored as a single comma-joined string of metric keys in @AppStorage (UserDefaults), the same
@@ -123,13 +123,25 @@ enum KeyMetric: CaseIterable, Identifiable, Hashable {
         .bloodOxygen, .respiratory, .steps, .weight, .calories,
     ] + catalogOptions
 
-    /// The fresh-install selection. Score tiles and Weight stay available in the editor, but start hidden
-    /// until a user explicitly adds them.
+    /// The fresh-install selection. Hero scores, Recovery Vitals measurements, and Weight stay available
+    /// in the editor, but start hidden until a user explicitly adds them.
     static let defaultSelection: [KeyMetric] = [
-        .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .calories,
+        .bloodOxygen, .steps, .calories,
     ]
 
     static var allCases: [KeyMetric] { defaultOrder }
+}
+
+/// Compact Today tiles use up to three columns, but four items balance as a 2×2 grid instead of leaving
+/// one narrow tile stranded on a second three-column row.
+enum KeyMetricGridLayout {
+    static func columnCount(itemCount: Int) -> Int {
+        switch itemCount {
+        case ...1: return 1
+        case 2, 4: return 2
+        default: return 3
+        }
+    }
 }
 
 struct CatalogKeyMetricSnapshot {

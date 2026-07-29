@@ -226,9 +226,9 @@ struct TodayView: View {
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
 
     // "Your cards" customisable dashboard (WHOOP "My Dashboard"), a persisted, reorderable selection of
-    // metric cards. Empty/unset shows the sensible default set (Stress / Fitness age / Vitality + HRV +
-    // Resting HR). The "CUSTOMISE" link on the section header opens a local sheet (no new nav destination).
-    // Persistence is display-only, these cards read the SAME values the rest of Today already loads.
+    // insight cards. Empty/unset shows Stress / Fitness age / Vitality; the ownership migration removes
+    // raw metric cards saved by older builds. The "CUSTOMISE" link opens a local sheet (no new destination).
+    // Persistence is display-only; these cards read the SAME values the rest of Today already loads.
     @AppStorage(DashboardCardPrefs.selectionKey) private var dashboardCardsRaw = ""
     @AppStorage(TodayLayoutPrefs.orderKey) private var sectionOrderRaw = ""
     @AppStorage(TodayLayoutPrefs.hiddenKey) private var hiddenSectionsRaw = ""

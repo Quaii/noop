@@ -23,7 +23,8 @@ import org.json.JSONArray
 // The Today screen's "Your cards" section is a user-customisable dashboard faithful to WHOOP's "My
 // Dashboard": the user chooses WHICH metric cards show and in WHAT order from a registry of the values
 // Today already loads. Persistence is DISPLAY-ONLY — no metric is computed or stored differently; this just
-// decides which already-loaded values render as WHOOP metric rows and in what sequence.
+// decides which already-loaded values render as WHOOP metric rows and in what sequence. New additions are
+// derived insights rather than duplicate raw vitals; a one-time migration removes older saved raw cards.
 //
 // Stored as a JSON-encoded array of card ids in SharedPreferences ("today.dashboardCards") — the SAME
 // JSON-array form the iOS @AppStorage uses, so a backup/restore reads the same dashboard on either OS.
@@ -67,16 +68,21 @@ enum class DashboardCard(
         fun fromRaw(raw: String?): DashboardCard? = entries.firstOrNull { it.raw == raw }
 
         /**
-         * The default set when the user hasn't customised the dashboard: the original Stress / Fitness age /
-         * Vitality trio plus HRV + Resting HR (per the task's "sensible default"). Cards with no value yet
-         * simply render a dash, so the default set is safe on a fresh install. Mirrors iOS defaultSelection.
+         * The fresh-install dashboard contains derived insights only. Raw cases remain decodable for
+         * compatibility, but the ownership migration removes them from saved Today layouts.
          */
         val defaultSelection: List<DashboardCard> = listOf(
-            STRESS, FITNESS_AGE, VITALITY, HRV, RESTING_HR,
+            STRESS, FITNESS_AGE, VITALITY,
         )
 
-        /** Canonical order used to list the disabled remainder in the editor (matches iOS allCases order). */
+        /** Full decoding registry. Do not remove legacy cases from this list. */
         val canonicalOrder: List<DashboardCard> = entries.toList()
+
+        /** Cards offered for new additions. Coupled is navigation, not a raw-value repeat. */
+        val availableSelection: List<DashboardCard> = listOf(
+            STRESS, FITNESS_AGE, VITALITY, COUPLED,
+        )
+
     }
 }
 

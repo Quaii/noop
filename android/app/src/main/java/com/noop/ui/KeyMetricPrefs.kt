@@ -6,8 +6,8 @@ import android.content.Context
 //
 // The Today screen's "Key Metrics" grid was a fixed list of ten tiles in one order. This lets the user
 // choose WHICH tiles show and in WHAT order. The complete catalogue retains the original order, while
-// fresh installs omit the three score tiles already represented by the Charge / Effort / Rest hero and
-// the optional Weight tile. Persistence is display-only — no metric is computed or stored differently;
+// fresh installs omit the scores already represented by the hero, the measurements represented by
+// Recovery Vitals, and the optional Weight tile. Persistence is display-only;
 // this just decides which of the already-computed tiles render and in what sequence.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
@@ -40,10 +40,18 @@ enum class KeyMetric(val raw: String, val title: String) {
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
         )
 
-        /** Fresh-install selection: the hero's three score tiles and Weight remain available, but start hidden. */
+        /** Fresh-install selection: Hero / Recovery Vitals values remain available but start hidden. */
         val defaultSelection: List<KeyMetric> = listOf(
-            HRV, RESTING_HR, BLOOD_OXYGEN, RESPIRATORY, STEPS, CALORIES,
+            BLOOD_OXYGEN, STEPS, CALORIES,
         )
+    }
+}
+
+object KeyMetricGridLayout {
+    fun columnCount(itemCount: Int): Int = when (itemCount) {
+        0, 1 -> 1
+        2, 4 -> 2
+        else -> 3
     }
 }
 

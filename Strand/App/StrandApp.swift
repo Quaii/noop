@@ -12,6 +12,9 @@ struct StrandApp: App {
         // Release is unaffected (whole harness is `#if DEBUG`). See DemoDayHarness.swift.
         DemoDayHarness.applyLaunchArgsIfNeeded()
         #endif
+        // Remove pre-registry Today duplicates before @AppStorage reads its first frame. The migration is
+        // versioned, so a duplicate the user deliberately adds afterward remains their choice.
+        TodayMetricOwnershipMigration.migrateIfNeeded()
         // Foreground presentation: without a delegate, macOS suppresses a notification's banner while the
         // app is frontmost, so a reminder tested with NOOP open would show nothing. Mirrors iOS.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared

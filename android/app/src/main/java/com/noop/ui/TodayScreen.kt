@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -431,9 +432,9 @@ fun TodayScreen(
     }
 
     // "Your cards" customisable dashboard (WHOOP "My Dashboard"), a persisted, reorderable selection of
-    // metric cards. Empty/unset shows the sensible default set (Stress / Fitness age / Vitality + HRV +
-    // Resting HR). The "CUSTOMISE" link on the section header opens a local sheet (no new nav destination).
-    // Persistence is display-only, these cards read the SAME values the rest of Today already loads.
+    // insight cards. Empty/unset shows Stress / Fitness age / Vitality; the ownership migration removes
+    // raw metric cards saved by older builds. The "CUSTOMISE" link opens a local sheet (no new destination).
+    // Persistence is display-only; these cards read the SAME values the rest of Today already loads.
     // SharedPreferences isn't reactive, so it's mirrored into local state and re-read when the editor saves.
     var showDashboardEditor by remember { mutableStateOf(false) }
     var enabledDashboardCards by remember { mutableStateOf(DashboardCardPrefs.enabled(context)) }
@@ -1638,6 +1639,8 @@ fun TodayScreen(
             initial = enabledKeyMetrics,
             initialDetailed = keyMetricsDetailed,
             initialWindowDays = keyMetricsWindowDays,
+            visibleSections = sectionOrder.filterNot { it in hiddenSections }.toSet(),
+            dashboardCards = enabledDashboardCards,
             onDismiss = { showMetricsEditor = false },
             onSave = { metrics, detailed, windowDays ->
                 KeyMetricPrefs.setEnabled(context, metrics)
@@ -1656,6 +1659,8 @@ fun TodayScreen(
     if (showDashboardEditor) {
         DashboardCardsEditorDialog(
             initial = enabledDashboardCards,
+            visibleSections = sectionOrder.filterNot { it in hiddenSections }.toSet(),
+            keyMetrics = enabledKeyMetrics,
             onDismiss = { showDashboardEditor = false },
             onSave = { cards ->
                 DashboardCardPrefs.setEnabled(context, cards)
@@ -1671,12 +1676,15 @@ fun TodayScreen(
         TodayLayoutEditorDialog(
             initialOrder = sectionOrder,
             initialHidden = hiddenSections,
+            initialKeyMetrics = enabledKeyMetrics,
             onDismiss = { showLayoutEditor = false },
-            onSave = { order, hidden ->
+            onSave = { order, hidden, metrics ->
                 TodayLayoutPrefs.setOrder(context, order)
                 TodayLayoutPrefs.setHidden(context, hidden)
+                KeyMetricPrefs.setEnabled(context, metrics)
                 sectionOrder = order
                 hiddenSections = hidden
+                enabledKeyMetrics = metrics
                 showLayoutEditor = false
             },
         )
@@ -3375,6 +3383,8 @@ private fun <T> EditableVisibilityRows(
     shown: MutableList<T>,
     hidden: MutableList<T>,
     itemTitle: (T) -> String,
+    itemSubtitle: (T) -> String? = { null },
+    shouldHide: (T) -> Boolean = { true },
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -3389,7 +3399,15 @@ private fun <T> EditableVisibilityRows(
                 modifier = Modifier.fillMaxWidth().padding(vertical = Metrics.space6),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(title, style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    Text(title, style = NoopType.body, color = Palette.textPrimary)
+                    itemSubtitle(item)?.let {
+                        Text(it, style = NoopType.caption, color = Palette.textTertiary)
+                    }
+                }
                 IconButton(
                     onClick = {
                         if (index > 0) shown.add(index - 1, shown.removeAt(index))
@@ -3420,7 +3438,7 @@ private fun <T> EditableVisibilityRows(
                 }
                 IconButton(
                     onClick = {
-                        if (shown.size > 1) hidden.add(shown.removeAt(index))
+                        if (shown.size > 1 && shouldHide(item)) hidden.add(shown.removeAt(index))
                     },
                     enabled = shown.size > 1,
                     modifier = Modifier.size(Metrics.iconButton),
@@ -3454,7 +3472,15 @@ private fun <T> EditableVisibilityRows(
                     modifier = Modifier.fillMaxWidth().padding(vertical = Metrics.space6),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(title, style = NoopType.body, color = Palette.textTertiary, modifier = Modifier.weight(1f))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                    ) {
+                        Text(title, style = NoopType.body, color = Palette.textTertiary)
+                        itemSubtitle(item)?.let {
+                            Text(it, style = NoopType.caption, color = Palette.textTertiary)
+                        }
+                    }
                     IconButton(
                         onClick = { shown.add(hidden.removeAt(index)) },
                         modifier = Modifier.size(Metrics.iconButton),
@@ -3484,13 +3510,15 @@ private fun <T> EditableVisibilityRows(
 @Composable
 private fun DashboardCardsEditorDialog(
     initial: List<DashboardCard>,
+    visibleSections: Set<TodaySection>,
+    keyMetrics: List<KeyMetric>,
     onDismiss: () -> Unit,
     onSave: (List<DashboardCard>) -> Unit,
 ) {
     val shown = remember { mutableStateListOf<DashboardCard>().apply { addAll(initial) } }
     val hidden = remember {
         mutableStateListOf<DashboardCard>().apply {
-            addAll(DashboardCard.canonicalOrder.filter { it !in initial })
+            addAll(DashboardCard.availableSelection.filter { it !in initial })
         }
     }
 
@@ -3517,6 +3545,13 @@ private fun DashboardCardsEditorDialog(
                     shown = shown,
                     hidden = hidden,
                     itemTitle = { it.title },
+                    itemSubtitle = { card ->
+                        TodayComponentRegistry.overlapLabelForDashboardCard(
+                            card,
+                            visibleSections,
+                            keyMetrics,
+                        )?.let { "${card.subtitle} · $it" } ?: card.subtitle
+                    },
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3525,7 +3560,7 @@ private fun DashboardCardsEditorDialog(
                             shown.clear()
                             shown.addAll(DashboardCard.defaultSelection)
                             hidden.clear()
-                            hidden.addAll(DashboardCard.canonicalOrder.filter { it !in shown })
+                            hidden.addAll(DashboardCard.availableSelection.filter { it !in shown })
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = Palette.textSecondary),
                     ) { Text(uiString(R.string.l10n_today_screen_reset_44c57abd), style = NoopType.body) }
@@ -3734,8 +3769,9 @@ private fun LazyItemScope.TodayReorderableSection(
 private fun TodayLayoutEditorDialog(
     initialOrder: List<TodaySection>,
     initialHidden: List<TodaySection>,
+    initialKeyMetrics: List<KeyMetric>,
     onDismiss: () -> Unit,
-    onSave: (List<TodaySection>, List<TodaySection>) -> Unit,
+    onSave: (List<TodaySection>, List<TodaySection>, List<KeyMetric>) -> Unit,
 ) {
     val hiddenSet = remember(initialHidden) { initialHidden.toSet() }
     val shown = remember {
@@ -3743,6 +3779,23 @@ private fun TodayLayoutEditorDialog(
     }
     val hidden = remember {
         mutableStateListOf<TodaySection>().apply { addAll(initialOrder.filter { it in hiddenSet }) }
+    }
+    val keyMetrics = remember {
+        mutableStateListOf<KeyMetric>().apply { addAll(initialKeyMetrics) }
+    }
+    var showRecoveryVitalsHandoff by remember { mutableStateOf(false) }
+
+    fun hideRecoveryVitals(keepIndividualTiles: Boolean) {
+        if (keepIndividualTiles) {
+            val merged = TodayComponentRegistry.keyMetricsKeepingRecoveryVitals(keyMetrics)
+            keyMetrics.clear()
+            keyMetrics.addAll(merged)
+            val keyMetricsIndex = hidden.indexOf(TodaySection.KEY_METRICS)
+            if (keyMetricsIndex >= 0) shown.add(hidden.removeAt(keyMetricsIndex))
+        }
+        val index = shown.indexOf(TodaySection.RECOVERY_VITALS)
+        if (index >= 0 && shown.size > 1) hidden.add(shown.removeAt(index))
+        showRecoveryVitalsHandoff = false
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -3764,6 +3817,14 @@ private fun TodayLayoutEditorDialog(
                     shown = shown,
                     hidden = hidden,
                     itemTitle = { it.title },
+                    shouldHide = {
+                        if (it == TodaySection.RECOVERY_VITALS) {
+                            showRecoveryVitalsHandoff = true
+                            false
+                        } else {
+                            true
+                        }
+                    },
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3777,7 +3838,13 @@ private fun TodayLayoutEditorDialog(
                     ) { Text(uiString(R.string.l10n_today_screen_reset_44c57abd), style = NoopType.body) }
                     Spacer(Modifier.weight(1f))
                     Button(
-                        onClick = { onSave(shown.toList() + hidden.toList(), hidden.toList()) },
+                        onClick = {
+                            onSave(
+                                shown.toList() + hidden.toList(),
+                                hidden.toList(),
+                                keyMetrics.toList(),
+                            )
+                        },
                         enabled = shown.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.accent,
@@ -3787,6 +3854,33 @@ private fun TodayLayoutEditorDialog(
                 }
             }
         }
+    }
+
+    if (showRecoveryVitalsHandoff) {
+        AlertDialog(
+            onDismissRequest = { showRecoveryVitalsHandoff = false },
+            title = { Text("Hide Recovery Vitals?") },
+            text = {
+                Text(
+                    "Recovery Vitals groups HRV, Resting HR, and Respiratory Rate. Choose whether those measurements should remain on Today as individual tiles.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { hideRecoveryVitals(keepIndividualTiles = true) }) {
+                    Text("Add missing vitals")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showRecoveryVitalsHandoff = false }) {
+                        Text("Cancel")
+                    }
+                    TextButton(onClick = { hideRecoveryVitals(keepIndividualTiles = false) }) {
+                        Text("Hide only", color = Palette.statusCritical)
+                    }
+                }
+            },
+        )
     }
 }
 
@@ -4406,10 +4500,11 @@ private fun MetricGrid(
     val hasOverflow = allTiles.size > METRICS_COLLAPSED_CAP
     val tiles = if (metricsExpanded || !hasOverflow) allTiles else allTiles.take(METRICS_COLLAPSED_CAP)
 
-    // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
-    // and a partial last row pads with empty weight so the columns stay aligned.
+    // Keep three compact columns for the normal grid, but balance exactly four metrics as 2×2 instead of
+    // stranding one narrow tile on a second three-column row.
+    val columnCount = KeyMetricGridLayout.columnCount(tiles.size)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(3).forEach { rowTiles ->
+        tiles.chunked(columnCount).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
             // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
             // shrink its card. Compact rows keep the plain layout, byte-identical to before.
@@ -4425,7 +4520,7 @@ private fun MetricGrid(
                         modifier = Modifier.weight(1f).then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(3 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
+                repeat(columnCount - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
         // S5: the "Show all metrics" / "Show fewer" expander — a centered link like iOS. Toggles visibility
@@ -5971,6 +6066,8 @@ private fun KeyMetricsEditorDialog(
     initial: List<KeyMetric>,
     initialDetailed: Boolean = false,
     initialWindowDays: Int = 14,
+    visibleSections: Set<TodaySection>,
+    dashboardCards: List<DashboardCard>,
     onDismiss: () -> Unit,
     onSave: (List<KeyMetric>, Boolean, Int) -> Unit,
 ) {
@@ -6046,6 +6143,13 @@ private fun KeyMetricsEditorDialog(
                     shown = shown,
                     hidden = hidden,
                     itemTitle = { it.title },
+                    itemSubtitle = {
+                        TodayComponentRegistry.overlapLabelForKeyMetric(
+                            it,
+                            visibleSections,
+                            dashboardCards,
+                        )
+                    },
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
