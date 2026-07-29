@@ -83,7 +83,6 @@ struct TodayReorderableSections<Content: View>: View {
         return ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 content(section)
-                    .disabled(editScope.isActive && !editingThisInlineSection)
                     .allowsHitTesting(!editScope.isActive || editingThisInlineSection)
                     .accessibilityHidden(editScope.isActive && !editingThisInlineSection)
 

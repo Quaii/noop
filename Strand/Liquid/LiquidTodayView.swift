@@ -706,11 +706,15 @@ struct LiquidTodayView: View {
             // Timeline already drew sleep + activity bands — it didn't at the time; the #979 spin-off
             // added that parity in FullDayChartView.)
             NavigationLink(value: TabRoute.fullDayChart) {
-                card {
-                    // Isolated leaf: it observes LiveState so the ~1 Hz HR notifies re-render ONLY this
-                    // card, never the whole Today. It owns both its expanded and compact-empty layouts.
-                    LiquidLiveHR(tint: liquidHeart, fallback: hrValues, animated: dataLoaded)
-                }
+                // Isolated leaf: it observes LiveState so the ~1 Hz HR notifies re-render ONLY this card,
+                // never the whole Today. It also owns the size-aware card radius: compact while empty,
+                // standard once there is enough data for the full chart.
+                LiquidLiveHR(
+                    tint: liquidHeart,
+                    fallback: hrValues,
+                    animated: dataLoaded,
+                    cardOpacity: cardOpacity
+                )
             }
             .buttonStyle(LiquidPressStyle())
             .accessibilityHint("Opens the full-day heart rate timeline")
@@ -1926,6 +1930,7 @@ private struct LiquidLiveHR: View {
     var tint: Color
     var fallback: [Double]        // today's banked 5-minute buckets — shown when there's no live stream
     var animated: Bool
+    var cardOpacity: Double
 
     @EnvironmentObject private var live: LiveState
     @State private var samples: [Double] = []
@@ -1952,6 +1957,20 @@ private struct LiquidLiveHR: View {
             } else {
                 compactEmptyContent
             }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            let radius = series.count >= 2
+                ? NoopMetrics.TodayCard.standardRadius
+                : NoopMetrics.TodayCard.compactRadius
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(StrandPalette.surfaceRaised)
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 1)
+                )
+                .opacity(cardOpacity)
         }
         .onAppear { if samples.isEmpty, let hr = live.heartRate, hr > 0 { samples = [Double(hr)] } }
         .onChangeCompat(of: live.heartRate) { hr in

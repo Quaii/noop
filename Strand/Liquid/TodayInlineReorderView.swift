@@ -92,7 +92,6 @@ struct TodayInlineReorderGrid<Item: Identifiable & Hashable, Content: View>: Vie
         return ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 content(item)
-                    .disabled(editScope.isActive)
                     .allowsHitTesting(!editScope.isActive)
                     .accessibilityHidden(editScope.isActive)
 
