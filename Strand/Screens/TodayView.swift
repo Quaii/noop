@@ -1434,7 +1434,9 @@ struct TodayView: View {
                 keyMetricsDetailed: $keyMetricsDetailed,
                 keyMetricsWindowDays: $keyMetricsWindowDays,
                 dashboardCardsRaw: $dashboardCardsRaw
-            )
+            ) { _ in
+                EmptyView()
+            }
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showLiveSession) {

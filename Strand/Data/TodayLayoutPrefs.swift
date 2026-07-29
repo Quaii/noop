@@ -58,6 +58,115 @@ enum TodaySection: String, CaseIterable, Identifiable, Hashable {
     ]
 }
 
+/// Today groups intentionally snap to a small set of supported presentations. This keeps the editor
+/// predictable like the iOS widget sizes instead of persisting arbitrary pixel dimensions that would
+/// break as the device width or Dynamic Type changes.
+enum TodayGroupSize: String, CaseIterable, Hashable {
+    case small
+    case wide
+    case large
+
+    var title: String {
+        switch self {
+        case .small: return "1×1"
+        case .wide: return "2×1"
+        case .large: return "2×2"
+        }
+    }
+
+    var columnSpan: Int {
+        self == .small ? 1 : 2
+    }
+}
+
+/// Transient presentation state while a Today group is under the resize corner. Resting layouts use
+/// integer positions; the drag supplies values between them so a component can morph continuously.
+struct TodayGroupResizeContext: Equatable {
+    static let inactive = TodayGroupResizeContext(
+        isActive: false,
+        continuousSizeIndex: 0
+    )
+
+    let isActive: Bool
+    /// 0 = 1×1, 1 = 2×1, 2 = 2×2. Values between them are the live drag position.
+    let continuousSizeIndex: CGFloat
+}
+
+extension TodaySection {
+    var supportedGroupSizes: [TodayGroupSize] {
+        switch self {
+        case .keyMetrics:
+            return [.small, .wide, .large]
+        case .workouts, .heartRate, .recoveryVitals:
+            return [.small, .wide]
+        default:
+            return [defaultGroupSize]
+        }
+    }
+
+    var defaultGroupSize: TodayGroupSize {
+        switch self {
+        case .keyMetrics:
+            return .large
+        default:
+            return .wide
+        }
+    }
+}
+
+/// Size choices use one generic map so more Today groups can gain a second presentation without adding a
+/// new preference key for every section. Only non-default values are encoded (`keyMetrics=wide`).
+enum TodayGroupLayoutPrefs {
+    static let key = "today.groupLayouts"
+
+    static func size(for section: TodaySection, raw: String) -> TodayGroupSize {
+        decode(raw)[section] ?? section.defaultGroupSize
+    }
+
+    static func setting(
+        _ size: TodayGroupSize,
+        for section: TodaySection,
+        raw: String
+    ) -> String {
+        guard section.supportedGroupSizes.contains(size) else { return raw }
+        var values = decode(raw)
+        if size == section.defaultGroupSize {
+            values.removeValue(forKey: section)
+        } else {
+            values[section] = size
+        }
+        return encode(values)
+    }
+
+    static func decode(_ raw: String) -> [TodaySection: TodayGroupSize] {
+        var values: [TodaySection: TodayGroupSize] = [:]
+        for token in raw.split(separator: ",") {
+            let pair = token.split(separator: "=", maxSplits: 1).map(String.init)
+            guard pair.count == 2,
+                  let section = TodaySection(rawValue: pair[0]),
+                  let size = TodayGroupSize(rawValue: pair[1]),
+                  section.supportedGroupSizes.contains(size),
+                  size != section.defaultGroupSize else {
+                continue
+            }
+            values[section] = size
+        }
+        return values
+    }
+
+    static func encode(_ values: [TodaySection: TodayGroupSize]) -> String {
+        TodaySection.defaultOrder.compactMap { section in
+            guard let size = values[section],
+                  section.supportedGroupSizes.contains(size),
+                  size != section.defaultGroupSize else {
+                return nil
+            }
+            return "\(section.rawValue)=\(size.rawValue)"
+        }
+        .joined(separator: ",")
+    }
+}
+
 /// Display-only persistence for the Today section order and visibility. The order registry always contains
 /// every known section; `hiddenKey` stores the explicit reversible hidden set. Mirrors Android byte-for-byte.
 enum TodayLayoutPrefs {

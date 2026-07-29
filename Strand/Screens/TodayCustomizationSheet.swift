@@ -12,7 +12,7 @@ enum TodayCustomizationDestination: String, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
-struct TodayCustomizationSheet: View {
+struct TodayCustomizationSheet<GroupPreview: View>: View {
     @Environment(\.dismiss) private var dismiss
 
     private enum Route: Hashable {
@@ -25,6 +25,7 @@ struct TodayCustomizationSheet: View {
     private let initialDashboardDraft: EditableLayoutDraft<DashboardCard>
     private let initialDetailed: Bool
     private let initialWindowDays: Int
+    private let groupPreview: (TodaySection) -> GroupPreview
 
     @Binding private var sectionOrderRaw: String
     @Binding private var hiddenSectionsRaw: String
@@ -63,7 +64,8 @@ struct TodayCustomizationSheet: View {
         keyMetricsRaw: Binding<String>,
         keyMetricsDetailed: Binding<Bool>,
         keyMetricsWindowDays: Binding<Int>,
-        dashboardCardsRaw: Binding<String>
+        dashboardCardsRaw: Binding<String>,
+        @ViewBuilder groupPreview: @escaping (TodaySection) -> GroupPreview
     ) {
         _sectionOrderRaw = sectionOrderRaw
         _hiddenSectionsRaw = hiddenSectionsRaw
@@ -71,6 +73,7 @@ struct TodayCustomizationSheet: View {
         _keyMetricsDetailed = keyMetricsDetailed
         _keyMetricsWindowDays = keyMetricsWindowDays
         _dashboardCardsRaw = dashboardCardsRaw
+        self.groupPreview = groupPreview
 
         let fullSectionOrder = TodayLayoutPrefs.decodeOrder(sectionOrderRaw.wrappedValue)
         let hiddenSectionSet = Set(TodayLayoutPrefs.decodeHidden(hiddenSectionsRaw.wrappedValue))
@@ -114,9 +117,9 @@ struct TodayCustomizationSheet: View {
             TodaySectionsCustomizationPage(
                 draft: $sectionDraft,
                 keyMetricDraft: $keyMetricDraft,
-                dashboardCardCount: dashboardDraft.visible.count,
                 onConfigure: openConfiguration,
-                onReset: resetCurrentLayout
+                onReset: resetCurrentLayout,
+                groupPreview: groupPreview
             )
             .toolbar {
                 customizationToolbar(showCancel: true)
@@ -220,64 +223,92 @@ struct TodayCustomizationSheet: View {
 
 // MARK: - Editor pages
 
-private struct TodaySectionsCustomizationPage: View {
+private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
     @Binding var draft: EditableLayoutDraft<TodaySection>
     @Binding var keyMetricDraft: EditableLayoutDraft<KeyMetric>
-    let dashboardCardCount: Int
     let onConfigure: (TodaySection) -> Void
     let onReset: () -> Void
-    @State private var showRecoveryVitalsHandoff = false
+    let groupPreview: (TodaySection) -> GroupPreview
+    @AppStorage(TodayGroupLayoutPrefs.key) private var groupLayoutsRaw = ""
+    @State private var searchText = ""
+    @State private var showRecoveryVitalsRemoval = false
 
     var body: some View {
-        EditableLayoutList(
-            draft: $draft,
-            shownTitle: String(localized: "Shown on Today"),
-            hiddenTitle: String(localized: "Hidden"),
-            hiddenGroupTitle: { _ in nil },
-            title: \.title,
-            subtitle: subtitle,
-            icon: \.customizationIcon,
-            tint: \.customizationTint,
-            configurationLabel: configurationLabel,
-            onConfigure: onConfigure,
-            shouldHide: shouldHide,
-            isAvailable: { _ in true },
-            onReset: onReset
-        ) {
-            EmptyView()
+        ScrollView {
+            VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+                if filteredGroups.isEmpty {
+                    VStack(spacing: NoopMetrics.space3) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 26, weight: .medium))
+                        Text("No matching groups")
+                            .font(StrandFont.headline)
+                    }
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, NoopMetrics.space10)
+                } else {
+                    LazyVStack(spacing: NoopMetrics.space4) {
+                        ForEach(filteredGroups) { descriptor in
+                            TodayGroupGalleryCard(
+                                descriptor: descriptor,
+                                isAdded: draft.visible.contains(descriptor.section),
+                                groupSize: TodayGroupLayoutPrefs.size(
+                                    for: descriptor.section,
+                                    raw: groupLayoutsRaw
+                                ),
+                                onToggle: { toggle(descriptor.section) },
+                                onConfigure: configurationLabel(for: descriptor.section) == nil
+                                    ? nil
+                                    : { onConfigure(descriptor.section) }
+                            ) {
+                                groupPreview(descriptor.section)
+                            }
+                        }
+                    }
+                }
+
+                Button("Reset Group Layout", role: .destructive, action: onReset)
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.statusCritical)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, NoopMetrics.space3)
+            }
+            .padding(.horizontal, NoopMetrics.space4)
+            .padding(.top, NoopMetrics.space3)
+            .padding(.bottom, NoopMetrics.space8)
         }
-        .navigationTitle("Customize Today")
+        .scrollContentBackground(.hidden)
+        .background(StrandPalette.surfaceBase)
+        .navigationTitle("Group Gallery")
         #if os(iOS)
+        .searchable(
+            text: $searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search groups"
+        )
         .navigationBarTitleDisplayMode(.inline)
+        #else
+        .searchable(text: $searchText, prompt: "Search groups")
         #endif
         .confirmationDialog(
-            "Hide Recovery Vitals?",
-            isPresented: $showRecoveryVitalsHandoff,
+            "Remove Recovery Vitals?",
+            isPresented: $showRecoveryVitalsRemoval,
             titleVisibility: .visible
         ) {
-            Button("Add missing vitals to Key Metrics") {
-                hideRecoveryVitals(keepingIndividualTiles: true)
+            Button("Keep its metrics as individual tiles") {
+                removeRecoveryVitals(keepingIndividualTiles: true)
             }
-            Button("Hide without adding them", role: .destructive) {
-                hideRecoveryVitals(keepingIndividualTiles: false)
+            Button("Remove group only", role: .destructive) {
+                removeRecoveryVitals(keepingIndividualTiles: false)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(
-                "Recovery Vitals groups HRV, Resting HR, and Respiratory Rate. Choose whether those measurements should remain on Today as individual tiles."
-            )
+            Text("Recovery Vitals contains HRV, Resting HR, and Respiratory Rate.")
         }
     }
 
-    private func subtitle(for section: TodaySection) -> String? {
-        switch section {
-        case .keyMetrics:
-            return String(localized: "\(keyMetricDraft.visible.count) metrics shown")
-        case .yourCards:
-            return String(localized: "\(dashboardCardCount) cards shown")
-        default:
-            return nil
-        }
+    private var filteredGroups: [TodayGroupDescriptor] {
+        TodayGroupCatalog.all.filter { $0.matches(searchText) }
     }
 
     private func configurationLabel(for section: TodaySection) -> String? {
@@ -289,20 +320,34 @@ private struct TodaySectionsCustomizationPage: View {
         }
     }
 
-    private func shouldHide(_ section: TodaySection) -> Bool {
-        guard section == .recoveryVitals else { return true }
-        showRecoveryVitalsHandoff = true
-        return false
+    private func toggle(_ section: TodaySection) {
+        if draft.visible.contains(section) {
+            guard draft.visible.count > 1 else { return }
+            if section == .recoveryVitals {
+                showRecoveryVitalsRemoval = true
+                return
+            }
+            StrandHaptic.selection.play()
+            withAnimation(StrandMotion.interactive) {
+                draft.hide(section)
+            }
+            return
+        }
+        guard draft.hidden.contains(section) else { return }
+        StrandHaptic.selection.play()
+        withAnimation(StrandMotion.interactive) {
+            draft.show(section)
+        }
     }
 
-    private func hideRecoveryVitals(keepingIndividualTiles: Bool) {
+    private func removeRecoveryVitals(keepingIndividualTiles: Bool) {
+        StrandHaptic.selection.play()
         withAnimation(StrandMotion.interactive) {
             if keepingIndividualTiles {
                 let merged = TodayComponentRegistry.keyMetricsKeepingRecoveryVitals(
                     keyMetricDraft.visible
                 )
-                for metric in merged
-                where !keyMetricDraft.visible.contains(metric) {
+                for metric in merged where !keyMetricDraft.visible.contains(metric) {
                     keyMetricDraft.show(metric)
                 }
                 if draft.hidden.contains(.keyMetrics) {
@@ -311,6 +356,143 @@ private struct TodaySectionsCustomizationPage: View {
             }
             draft.hide(.recoveryVitals)
         }
+    }
+}
+
+private struct TodayGroupGalleryCard<Preview: View>: View {
+    let descriptor: TodayGroupDescriptor
+    let isAdded: Bool
+    let groupSize: TodayGroupSize
+    let onToggle: () -> Void
+    let onConfigure: (() -> Void)?
+    let preview: Preview
+
+    init(
+        descriptor: TodayGroupDescriptor,
+        isAdded: Bool,
+        groupSize: TodayGroupSize,
+        onToggle: @escaping () -> Void,
+        onConfigure: (() -> Void)?,
+        @ViewBuilder preview: () -> Preview
+    ) {
+        self.descriptor = descriptor
+        self.isAdded = isAdded
+        self.groupSize = groupSize
+        self.onToggle = onToggle
+        self.onConfigure = onConfigure
+        self.preview = preview()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            HStack(alignment: .top, spacing: NoopMetrics.space2) {
+                VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                    Text(descriptor.title)
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .lineLimit(1)
+                    Text(descriptor.summary)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+
+                if descriptor.section.supportedGroupSizes.count > 1 {
+                    Text(groupSize.title)
+                        .font(StrandFont.caption.weight(.semibold))
+                        .foregroundStyle(StrandPalette.accent)
+                        .padding(.horizontal, NoopMetrics.space2)
+                        .padding(.vertical, NoopMetrics.space1)
+                        .background(StrandPalette.accent.opacity(0.1), in: Capsule())
+                }
+                if let onConfigure {
+                    Button(action: onConfigure) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StrandPalette.accent)
+                            .frame(width: 28, height: 28)
+                            .background(StrandPalette.surfaceInset, in: Circle())
+                    }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit \(descriptor.title)")
+                }
+
+                Button(action: onToggle) {
+                    Image(systemName: isAdded ? "checkmark" : "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(
+                            isAdded ? StrandPalette.surfaceBase : StrandPalette.accent
+                        )
+                        .frame(width: 24, height: 24)
+                        .background(
+                            isAdded ? StrandPalette.statusPositive : StrandPalette.surfaceInset,
+                            in: Circle()
+                        )
+                        .overlay {
+                            if !isAdded {
+                                Circle().strokeBorder(StrandPalette.accent.opacity(0.6), lineWidth: 1)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    isAdded ? "Remove \(descriptor.title)" : "Add \(descriptor.title)"
+                )
+            }
+
+            // This is the exact section builder used by Today: live values, current card styling, current
+            // footprint, and real intrinsic aspect ratio. Interaction is disabled only inside the gallery.
+            TodayGroupGalleryPreviewLayout(columnSpan: groupSize.columnSpan) {
+                preview
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.bottom, NoopMetrics.space4)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(StrandPalette.hairline)
+        }
+    }
+}
+
+/// Proposes the same one- or two-column width the section receives on Today while keeping the gallery row
+/// full-width for its title and controls.
+private struct TodayGroupGalleryPreviewLayout: Layout {
+    let columnSpan: Int
+    private let spacing = NoopMetrics.space2
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let availableWidth = proposal.width ?? 320
+        let targetWidth = columnSpan == 1
+            ? max(0, (availableWidth - spacing) / 2)
+            : availableWidth
+        let size = subview.sizeThatFits(
+            ProposedViewSize(width: targetWidth, height: nil)
+        )
+        return CGSize(width: availableWidth, height: size.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        let targetWidth = columnSpan == 1
+            ? max(0, (bounds.width - spacing) / 2)
+            : bounds.width
+        subview.place(
+            at: bounds.origin,
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: targetWidth, height: nil)
+        )
     }
 }
 
@@ -446,7 +628,11 @@ private struct DashboardCardsCustomizationPage: View {
         keyMetricsDetailed: .constant(false),
         keyMetricsWindowDays: .constant(14),
         dashboardCardsRaw: .constant("")
-    )
+    ) { section in
+        Text(section.title)
+            .frame(maxWidth: .infinity, minHeight: 120)
+            .background(StrandPalette.surfaceRaised)
+    }
     .preferredColorScheme(.dark)
 }
 #endif

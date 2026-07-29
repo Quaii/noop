@@ -50,6 +50,7 @@ struct LiquidTodayView: View {
     // sheets / expanders
     @State private var guideSection: ScoreSection?
     @State private var customizationDestination: TodayCustomizationDestination?
+    @State private var resumeSectionEditingAfterCustomization = false
     @State private var showSettings = false
     @State private var synthesisExpanded = false
     @State private var showLiveSession = false
@@ -64,6 +65,7 @@ struct LiquidTodayView: View {
     // options. Decode inserts missing sections at their default positions.
     @AppStorage(TodayLayoutPrefs.orderKey) private var sectionOrderRaw = ""
     @AppStorage(TodayLayoutPrefs.hiddenKey) private var hiddenSectionsRaw = ""
+    @AppStorage(TodayGroupLayoutPrefs.key) private var groupLayoutsRaw = ""
     @State private var todayEditScope: TodayEditScope = .inactive
     private var todayLayoutEditing: Bool { todayEditScope.isActive }
     private var sectionOrder: [TodaySection] {
@@ -80,6 +82,15 @@ struct LiquidTodayView: View {
     @State private var kSparks: [String: [(String, Double)]] = [:]
     @State private var catalogKeyMetricSnapshots: [String: CatalogKeyMetricSnapshot] = [:]
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
+    private func groupSize(for section: TodaySection) -> TodayGroupSize {
+        TodayGroupLayoutPrefs.size(for: section, raw: groupLayoutsRaw)
+    }
+    private var keyMetricsGroupSize: TodayGroupSize {
+        groupSize(for: .keyMetrics)
+    }
+    private var workoutsGroupSize: TodayGroupSize { groupSize(for: .workouts) }
+    private var heartRateGroupSize: TodayGroupSize { groupSize(for: .heartRate) }
+    private var recoveryVitalsGroupSize: TodayGroupSize { groupSize(for: .recoveryVitals) }
 
     // day navigation (0 = today, 1 = yesterday, …)
     @State private var selectedDayOffset = 0
@@ -261,12 +272,13 @@ struct LiquidTodayView: View {
                     #if os(iOS)
                     TodayReorderableSections(
                         orderRaw: $sectionOrderRaw,
+                        groupLayoutsRaw: $groupLayoutsRaw,
                         editScope: $todayEditScope,
                         sections: sectionOrder,
                         coordinateSpace: Self.pullSpace,
                         onRemove: hideTodaySection
-                    ) { section in
-                        todaySection(section)
+                    ) { section, resizeContext in
+                        todaySection(section, resizeContext: resizeContext)
                     }
                     #else
                     ForEach(sectionOrder) { section in
@@ -328,7 +340,10 @@ struct LiquidTodayView: View {
         .sheet(item: $guideSection) { section in
             NavigationStack { ScoringGuideView(initialSection: section, onClose: { guideSection = nil }) }
         }
-        .sheet(item: $customizationDestination) { destination in
+        .sheet(
+            item: $customizationDestination,
+            onDismiss: restoreEditingAfterCustomization
+        ) { destination in
             TodayCustomizationSheet(
                 initialDestination: destination,
                 sectionOrderRaw: $sectionOrderRaw,
@@ -337,7 +352,9 @@ struct LiquidTodayView: View {
                 keyMetricsDetailed: $keyMetricsDetailed,
                 keyMetricsWindowDays: $keyMetricsWindowDays,
                 dashboardCardsRaw: $dashboardCardsRaw
-            )
+            ) { section in
+                todaySection(section)
+            }
         }
         #if os(iOS)
         .confirmationDialog(
@@ -471,7 +488,7 @@ struct LiquidTodayView: View {
                             accessibilityLabel: "Customize Today"
                         ) {
                             StrandHaptic.selection.play()
-                            customizationDestination = .today
+                            presentGroupGallery(resumeEditing: true)
                         }
                         todayEditControl("Reset", tint: StrandPalette.onDarkSecondary) {
                             StrandHaptic.selection.play()
@@ -516,16 +533,19 @@ struct LiquidTodayView: View {
     }
 
     @ViewBuilder
-    private func todaySection(_ section: TodaySection) -> some View {
+    private func todaySection(
+        _ section: TodaySection,
+        resizeContext: TodayGroupResizeContext = .inactive
+    ) -> some View {
         switch section {
         case .hero: heroCard
         case .liveSession:
             if liveSessionsBeta { liveSessionStartRow }
         case .synthesis: synthesisSection
-        case .keyMetrics: keyMetricsSection
-        case .workouts: lastWorkoutsSection
-        case .heartRate: heartRateSection
-        case .recoveryVitals: recoveryVitalsSection
+        case .keyMetrics: keyMetricsSection(resizeContext: resizeContext)
+        case .workouts: lastWorkoutsSection(resizeContext: resizeContext)
+        case .heartRate: heartRateSection(resizeContext: resizeContext)
+        case .recoveryVitals: recoveryVitalsSection(resizeContext: resizeContext)
         case .yourCards: yourCardsSection
         // #656: the persistent journal widget stays in the same saved order registry as every other
         // Today section, but only renders on today and still honours its own reminder visibility gate.
@@ -598,6 +618,24 @@ struct LiquidTodayView: View {
         }
     }
     #endif
+
+    private func presentGroupGallery(resumeEditing: Bool = false) {
+        resumeSectionEditingAfterCustomization = resumeEditing && todayEditScope == .sections
+        if resumeSectionEditingAfterCustomization {
+            withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+                todayEditScope = .inactive
+            }
+        }
+        customizationDestination = .today
+    }
+
+    private func restoreEditingAfterCustomization() {
+        guard resumeSectionEditingAfterCustomization else { return }
+        resumeSectionEditingAfterCustomization = false
+        withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+            todayEditScope = .sections
+        }
+    }
 
     private func hideTodaySection(_ section: TodaySection) {
         guard sectionOrder.count > 1 else { return }
@@ -741,9 +779,14 @@ struct LiquidTodayView: View {
 
     // MARK: - Heart rate
 
-    private var heartRateSection: some View {
-        VStack(spacing: 8) {
-            sectionHead("HEART RATE", trailing: "Live")
+    private func heartRateSection(
+        resizeContext: TodayGroupResizeContext
+    ) -> some View {
+        let compact = resizeContext.isActive
+            ? resizeContext.continuousSizeIndex < 0.5
+            : heartRateGroupSize == .small
+        return VStack(spacing: 8) {
+            sectionHead("HEART RATE", trailing: compact ? "" : "Live")
             // #979: the whole-day HR trend (Deep Timeline) still exists but was buried behind Metrics →
             // Show all → Deep Timeline. Make the live HR card a one-tap route into it, with a visible
             // "Full day" affordance so it's discoverable again. (This comment used to claim the Deep
@@ -757,12 +800,16 @@ struct LiquidTodayView: View {
                     tint: liquidHeart,
                     fallback: hrValues,
                     animated: dataLoaded,
-                    cardOpacity: cardOpacity
+                    cardOpacity: cardOpacity,
+                    compactWidget: compact
                 )
             }
             .buttonStyle(LiquidPressStyle())
             .accessibilityHint("Opens the full-day heart rate timeline")
         }
+        .frame(minHeight: compact ? 156 : nil, alignment: .top)
+        .opacity(twoStageResizeOpacity(resizeContext))
+        .blur(radius: twoStageResizeBlur(resizeContext))
     }
 
     // MARK: - Your cards
@@ -1003,33 +1050,71 @@ struct LiquidTodayView: View {
 
     // MARK: - Recovery vitals
 
-    private var recoveryVitalsSection: some View {
+    private func recoveryVitalsSection(
+        resizeContext: TodayGroupResizeContext
+    ) -> some View {
         // PER-FIELD, today-first carry: each vital reads today's own value, else falls back to the prior
         // day that recorded it (`vitalsDay`). Coalesce ONCE so the number and its fill fraction agree.
         let hrv = displayDay?.avgHrv ?? vitalsDay?.avgHrv
         let rhr = (displayDay?.restingHr ?? vitalsDay?.restingHr).map(Double.init)
         let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
+        let compact = resizeContext.isActive
+            ? resizeContext.continuousSizeIndex < 0.5
+            : recoveryVitalsGroupSize == .small
         return VStack(spacing: 8) {
-            sectionHead("RECOVERY VITALS", trailing: vitalsProvenanceLine ?? "")
+            sectionHead("RECOVERY VITALS", trailing: compact ? "" : (vitalsProvenanceLine ?? ""))
             card {
                 VStack(alignment: .leading, spacing: 12) {
-                    vitalRow(String(localized: "Heart-rate variability"), unitText(hrv, "ms"),
-                             StrandPalette.metricCyan, fracOver(hrv, 120))
-                    vitalRow(String(localized: "Resting heart rate"), unitText(rhr, "bpm"),
-                             StrandPalette.metricRose, fracOver(rhr, 100))
-                    vitalRow(String(localized: "Breaths per minute"), unitText(resp, "rpm", decimals: 1),
-                             StrandPalette.accent, fracOver(resp, 24))
+                    vitalRow(
+                        compact ? "HRV" : String(localized: "Heart-rate variability"),
+                        unitText(hrv, "ms"),
+                        StrandPalette.metricCyan,
+                        fracOver(hrv, 120),
+                        compact: compact
+                    )
+                    vitalRow(
+                        compact ? String(localized: "Rest HR") : String(localized: "Resting heart rate"),
+                        unitText(rhr, "bpm"),
+                        StrandPalette.metricRose,
+                        fracOver(rhr, 100),
+                        compact: compact
+                    )
+                    vitalRow(
+                        compact ? String(localized: "Resp.") : String(localized: "Breaths per minute"),
+                        unitText(resp, "rpm", decimals: 1),
+                        StrandPalette.accent,
+                        fracOver(resp, 24),
+                        compact: compact
+                    )
                 }
             }
         }
+        .frame(minHeight: compact ? 156 : nil, alignment: .top)
+        .opacity(twoStageResizeOpacity(resizeContext))
+        .blur(radius: twoStageResizeBlur(resizeContext))
     }
 
-    private func vitalRow(_ label: String, _ value: String, _ tint: Color, _ frac: Double?) -> some View {
-        HStack(spacing: 12) {
-            LiquidVessel(value: frac, tint: tint, animated: false).frame(width: 26, height: 26)
-            Text(label).font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
+    private func vitalRow(
+        _ label: String,
+        _ value: String,
+        _ tint: Color,
+        _ frac: Double?,
+        compact: Bool = false
+    ) -> some View {
+        HStack(spacing: compact ? 7 : 12) {
+            LiquidVessel(value: frac, tint: tint, animated: false)
+                .frame(width: compact ? 22 : 26, height: compact ? 22 : 26)
+            Text(label)
+                .font(compact ? StrandFont.caption : StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             Spacer()
-            Text(value).font(StrandFont.number(15)).foregroundStyle(StrandPalette.textPrimary)
+            Text(value)
+                .font(StrandFont.number(compact ? 12 : 15))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 
@@ -1065,16 +1150,30 @@ struct LiquidTodayView: View {
         }
     }
 
-    private var keyMetricsSection: some View {
+    private func keyMetricsSection(
+        resizeContext: TodayGroupResizeContext
+    ) -> some View {
         // HRV / Rest HR (+ Blood Oxygen / Respiratory) tiles share the recovery vitals' per-field
         // today-first carry so they don't blank at the rollover while Recovery/Strain/Rest stay strictly
         // today's own (they are scored surfaces).
         let hrv = displayDay?.avgHrv ?? vitalsDay?.avgHrv
         let rhr = (displayDay?.restingHr ?? vitalsDay?.restingHr).map(Double.init)
-        let columnCount = KeyMetricGridLayout.columnCount(itemCount: enabledKeyMetrics.count)
+        let visibleMetrics = keyMetricsGroupSize == .large && !resizeContext.isActive
+            ? enabledKeyMetrics
+            : Array(enabledKeyMetrics.prefix(4))
+        let hiddenMetricCount = enabledKeyMetrics.count - visibleMetrics.count
+        let columnCount = KeyMetricGridLayout.columnCount(
+            itemCount: visibleMetrics.count,
+            groupSize: keyMetricsGroupSize
+        )
         return VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                sectionHead("KEY METRICS", trailing: trendWindowLabel)
+                sectionHead(
+                    "KEY METRICS",
+                    trailing: keyMetricsGroupSize == .large && !resizeContext.isActive
+                        ? trendWindowLabel
+                        : (hiddenMetricCount > 0 ? "+\(hiddenMetricCount)" : "")
+                )
                     #if os(iOS)
                     .contentShape(Rectangle())
                     .simultaneousGesture(
@@ -1083,53 +1182,75 @@ struct LiquidTodayView: View {
                         including: todayLayoutEditing ? .none : .all
                     )
                     #endif
-                // #430 parity: the SAME editor the classic grid uses — selection + order + Detailed tiles.
-                Button { customizationDestination = .keyMetrics } label: {
-                    Text(String(localized: "Edit").uppercased())
-                        .font(StrandFont.overlineScaled(11))
-                        .tracking(1.0)
-                        .foregroundStyle(StrandPalette.accent)
+                if keyMetricsGroupSize == .large && !resizeContext.isActive {
+                    // #430 parity: the SAME editor the classic grid uses — selection + order + Detailed tiles.
+                    Button { customizationDestination = .keyMetrics } label: {
+                        Text(String(localized: "Edit").uppercased())
+                            .font(StrandFont.overlineScaled(11))
+                            .tracking(1.0)
+                            .foregroundStyle(StrandPalette.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit Key Metrics")
+                    .disabled(todayLayoutEditing)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Edit Key Metrics")
-                .disabled(todayLayoutEditing)
             }
             // #430 parity: the grid honours the Key-Metrics editor. On iPhone each visible tile is also
             // directly reorderable in the shared Today edit mode, without adding a visual handle.
             #if os(iOS)
-            TodayInlineReorderGrid(
-                editScope: $todayEditScope,
-                section: .keyMetrics,
-                items: enabledKeyMetrics,
-                columns: Array(
-                    repeating: GridItem(.flexible(), spacing: NoopMetrics.space2),
-                    count: columnCount
-                ),
-                spacing: NoopMetrics.space2,
-                coordinateSpace: Self.pullSpace,
-                accessibilityLabel: { $0.title },
-                onMove: { keyMetricsRaw = KeyMetricPrefs.encode($0) },
-                onRemove: hideKeyMetric
-            ) { metric in
-                ktileFor(metric, hrv: hrv, rhr: rhr)
+            if resizeContext.isActive {
+                KeyMetricContinuousResizeLayout(
+                    sizeIndex: resizeContext.continuousSizeIndex,
+                    spacing: NoopMetrics.space2
+                ) {
+                    ForEach(visibleMetrics) { metric in
+                        ktileFor(metric, hrv: hrv, rhr: rhr)
+                    }
+                }
+                .allowsHitTesting(false)
+            } else {
+                TodayInlineReorderGrid(
+                    editScope: $todayEditScope,
+                    section: .keyMetrics,
+                    items: visibleMetrics,
+                    columns: Array(
+                        repeating: GridItem(.flexible(), spacing: NoopMetrics.space2),
+                        count: columnCount
+                    ),
+                    spacing: NoopMetrics.space2,
+                    coordinateSpace: Self.pullSpace,
+                    accessibilityLabel: { $0.title },
+                    onMove: persistVisibleKeyMetricOrder,
+                    onRemove: hideKeyMetric
+                ) { metric in
+                    ktileFor(metric, hrv: hrv, rhr: rhr)
+                }
             }
             #else
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount),
                 spacing: 8
             ) {
-                ForEach(enabledKeyMetrics) { metric in
+                ForEach(visibleMetrics) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
                 }
             }
             #endif
-            NavigationLink(value: TabRoute.metricExplorer) {
-                Text("Show all metrics").font(StrandFont.subhead).foregroundStyle(StrandPalette.accent)
-                    .frame(maxWidth: .infinity).padding(.top, 2)
+            if keyMetricsGroupSize == .large && !resizeContext.isActive {
+                NavigationLink(value: TabRoute.metricExplorer) {
+                    Text("Show all metrics").font(StrandFont.subhead).foregroundStyle(StrandPalette.accent)
+                        .frame(maxWidth: .infinity).padding(.top, 2)
+                }
+                .buttonStyle(.plain)
+                .disabled(todayLayoutEditing)
             }
-            .buttonStyle(.plain)
-            .disabled(todayLayoutEditing)
         }
+        .frame(minHeight: keyMetricsGroupSize == .small ? 156 : nil, alignment: .top)
+    }
+
+    private func persistVisibleKeyMetricOrder(_ reorderedVisible: [KeyMetric]) {
+        let remaining = enabledKeyMetrics.filter { !reorderedVisible.contains($0) }
+        keyMetricsRaw = KeyMetricPrefs.encode(reorderedVisible + remaining)
     }
 
     /// One editor-selected Key-Metric tile: the metric's value/tint/fill exactly as the old hard-coded
@@ -1199,20 +1320,26 @@ struct LiquidTodayView: View {
     private func ktile(_ label: String, _ value: String, _ unit: String, _ tint: Color, _ frac: Double?,
                        key: String? = nil, detailMetric: MetricDescriptor? = nil,
                        sparkRows: [(String, Double)]? = nil) -> some View {
-        let tile = VStack(alignment: .leading, spacing: 6) {
-            Text(label.uppercased()).font(StrandFont.overlineScaled(9)).tracking(1.2)
+        let condensed = keyMetricsGroupSize != .large
+        let tile = VStack(alignment: .leading, spacing: condensed ? 4 : 6) {
+            Text(label.uppercased())
+                .font(StrandFont.overlineScaled(condensed ? 7 : 9))
+                .tracking(condensed ? 0.7 : 1.2)
                 .foregroundStyle(StrandPalette.textTertiary)
-            (Text(value).font(StrandFont.number(17))
-                + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.caption))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+            (Text(value).font(StrandFont.number(condensed ? 14 : 17))
+                + Text(unit.isEmpty ? "" : " \(unit)")
+                    .font(condensed ? StrandFont.overlineScaled(7) : StrandFont.caption))
                 .foregroundStyle(StrandPalette.textPrimary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            LiquidTube(frac: frac ?? 0, tint: tint, height: 8, animated: false)
+                .minimumScaleFactor(condensed ? 0.55 : 0.7)
+            LiquidTube(frac: frac ?? 0, tint: tint, height: condensed ? 6 : 8, animated: false)
             // #430 parity: DETAILED tiles grow the trend graph under the bar, tinted to the metric and
             // windowed to the editor's 2-day / 1-week / 2-week choice (the Android twin). A metric with no
             // windowed series keeps a clear placeholder of the same height so every tile in a detailed row
             // stays equal-height with its bars aligned.
-            if keyMetricsDetailed {
+            if keyMetricsDetailed && !condensed {
                 let spark = sparkRows.map(windowedSpark)
                     ?? key.map { windowedSpark($0) }
                     ?? []
@@ -1227,8 +1354,8 @@ struct LiquidTodayView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
+        .padding(.horizontal, condensed ? 8 : 12)
+        .padding(.vertical, condensed ? 9 : 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(
@@ -1300,11 +1427,21 @@ struct LiquidTodayView: View {
 
     // MARK: - Last workouts
 
-    private var lastWorkoutsSection: some View {
-        VStack(spacing: 8) {
-            sectionHead("LAST WORKOUTS", trailing: "\(workouts.count) total")
+    private func lastWorkoutsSection(
+        resizeContext: TodayGroupResizeContext
+    ) -> some View {
+        let compact = resizeContext.isActive
+            ? resizeContext.continuousSizeIndex < 0.5
+            : workoutsGroupSize == .small
+        return VStack(spacing: 8) {
+            sectionHead(
+                compact ? "LAST WORKOUT" : "LAST WORKOUTS",
+                trailing: compact ? "" : "\(workouts.count) total"
+            )
             if let w = workouts.first {
-                NavigationLink(value: TabRoute.workouts) { workoutCard(w) }
+                NavigationLink(value: TabRoute.workouts) {
+                    compact ? AnyView(compactWorkoutCard(w)) : AnyView(workoutCard(w))
+                }
                     .buttonStyle(LiquidPressStyle())
             } else {
                 card(cornerRadius: NoopMetrics.TodayCard.compactRadius) {
@@ -1313,6 +1450,49 @@ struct LiquidTodayView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
+        }
+        .frame(minHeight: compact ? 156 : nil, alignment: .top)
+        .opacity(twoStageResizeOpacity(resizeContext))
+        .blur(radius: twoStageResizeBlur(resizeContext))
+    }
+
+    private func twoStageResizeTransition(_ context: TodayGroupResizeContext) -> CGFloat {
+        guard context.isActive else { return 0 }
+        let distanceFromSwap = abs(context.continuousSizeIndex - 0.5)
+        return max(0, 1 - distanceFromSwap / 0.2)
+    }
+
+    private func twoStageResizeOpacity(_ context: TodayGroupResizeContext) -> Double {
+        Double(1 - twoStageResizeTransition(context) * 0.82)
+    }
+
+    private func twoStageResizeBlur(_ context: TodayGroupResizeContext) -> CGFloat {
+        twoStageResizeTransition(context) * 7
+    }
+
+    private func compactWorkoutCard(_ workout: WorkoutRow) -> some View {
+        card(cornerRadius: NoopMetrics.TodayCard.tileRadius) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(WorkoutSource.displaySport(workout.sport))
+                    .font(StrandFont.number(14))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(1)
+                (Text(effortText(workout.strain)).font(StrandFont.number(17))
+                    + Text(" EFFORT").font(StrandFont.overlineScaled(7)))
+                    .foregroundStyle(StrandPalette.effortColor)
+                    .lineLimit(1)
+                Text(workoutSub(workout))
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                LiquidTube(
+                    frac: (workout.strain ?? 0) / 100,
+                    tint: StrandPalette.effortColor,
+                    height: 8,
+                    animated: false
+                )
             }
         }
     }
@@ -1372,7 +1552,7 @@ struct LiquidTodayView: View {
             kind: .secondary,
             fullWidth: true
         ) {
-            customizationDestination = .today
+            presentGroupGallery()
         }
     }
 
@@ -1970,6 +2150,95 @@ private struct LiquidAddButton: View {
     }
 }
 
+#if os(iOS)
+/// Morphs the first four Key Metrics through the same three footprints as the group resize corner:
+/// 1×1 (2×2 tiles) → 2×1 (four across) → 2×2 (2×2 tiles). Positions and widths interpolate on every
+/// drag update, so the group itself follows the finger instead of swapping grids at a threshold.
+private struct KeyMetricContinuousResizeLayout: Layout {
+    var sizeIndex: CGFloat
+    let spacing: CGFloat
+
+    struct CacheData {
+        var rects: [CGRect] = []
+    }
+
+    func makeCache(subviews: Subviews) -> CacheData {
+        CacheData()
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout CacheData
+    ) -> CGSize {
+        let width = proposal.width ?? 320
+        cache.rects = rectangles(width: width, subviews: subviews)
+        let height = cache.rects.map(\.maxY).max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout CacheData
+    ) {
+        let rects = cache.rects.count == subviews.count
+            ? cache.rects
+            : rectangles(width: bounds.width, subviews: subviews)
+        for (index, subview) in subviews.enumerated() where rects.indices.contains(index) {
+            let rect = rects[index]
+            subview.place(
+                at: CGPoint(x: bounds.minX + rect.minX, y: bounds.minY + rect.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: rect.width, height: rect.height)
+            )
+        }
+    }
+
+    private func rectangles(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        let clamped = min(2, max(0, sizeIndex))
+        let sourceColumns = clamped <= 1 ? 2 : 4
+        let targetColumns = clamped <= 1 ? 4 : 2
+        let progress = clamped <= 1 ? clamped : clamped - 1
+
+        func tileWidth(columns: Int) -> CGFloat {
+            max(1, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+        }
+
+        let sourceWidth = tileWidth(columns: sourceColumns)
+        let targetWidth = tileWidth(columns: targetColumns)
+        let currentWidth = sourceWidth + (targetWidth - sourceWidth) * progress
+        let tileHeight = subviews.map {
+            $0.sizeThatFits(ProposedViewSize(width: currentWidth, height: nil)).height
+        }
+        .max() ?? 0
+
+        func rect(index: Int, columns: Int, itemWidth: CGFloat) -> CGRect {
+            let row = index / columns
+            let column = index % columns
+            return CGRect(
+                x: CGFloat(column) * (itemWidth + spacing),
+                y: CGFloat(row) * (tileHeight + spacing),
+                width: itemWidth,
+                height: tileHeight
+            )
+        }
+
+        return subviews.indices.map { index in
+            let source = rect(index: index, columns: sourceColumns, itemWidth: sourceWidth)
+            let target = rect(index: index, columns: targetColumns, itemWidth: targetWidth)
+            return CGRect(
+                x: source.minX + (target.minX - source.minX) * progress,
+                y: source.minY + (target.minY - source.minY) * progress,
+                width: currentWidth,
+                height: tileHeight
+            )
+        }
+    }
+}
+#endif
+
 /// The live heart-rate readout leaf. Owns LiveState so the ~1 Hz HR notifies re-render ONLY this card,
 /// never the whole Today (the isolation the classic Today depends on). Keeps its own rolling buffer of
 /// live samples, shows the current bpm live with a beat-by-beat trace, and falls back to today's banked
@@ -1979,6 +2248,7 @@ private struct LiquidLiveHR: View {
     var fallback: [Double]        // today's banked 5-minute buckets — shown when there's no live stream
     var animated: Bool
     var cardOpacity: Double
+    var compactWidget = false
 
     @EnvironmentObject private var live: LiveState
     @State private var samples: [Double] = []
@@ -2000,16 +2270,18 @@ private struct LiquidLiveHR: View {
 
     var body: some View {
         Group {
-            if series.count >= 2 {
+            if compactWidget {
+                compactWidgetContent
+            } else if series.count >= 2 {
                 expandedContent
             } else {
                 compactEmptyContent
             }
         }
-        .padding(16)
+        .padding(compactWidget ? 12 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            let radius = series.count >= 2
+            let radius = !compactWidget && series.count >= 2
                 ? NoopMetrics.TodayCard.standardRadius
                 : NoopMetrics.TodayCard.compactRadius
             RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -2026,6 +2298,36 @@ private struct LiquidLiveHR: View {
             samples.append(Double(hr))
             if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
             beat.toggle()
+        }
+    }
+
+    private var compactWidgetContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("BPM")
+                    .font(StrandFont.overline)
+                    .tracking(1.2)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Spacer(minLength: 4)
+                if let hr = bigBpm {
+                    Text("\(hr)")
+                        .font(StrandFont.rounded(20))
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                        .contentTransition(.numericText())
+                }
+            }
+            if series.count >= 2 {
+                LiquidThread(bpm: series, tint: tint, height: 48, animated: animated)
+            } else {
+                Text(subtitle)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
+            }
+            fullDayAffordance
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 

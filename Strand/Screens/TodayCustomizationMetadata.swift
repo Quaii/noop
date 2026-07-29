@@ -315,6 +315,87 @@ enum TodayMetricSourceAvailability {
     }
 }
 
+/// Reader-facing metadata for the visual group gallery. The section remains the persisted identity; these
+/// labels can evolve without invalidating a saved Today layout.
+struct TodayGroupDescriptor: Identifiable, Hashable {
+    let section: TodaySection
+    let title: String
+    let summary: String
+    let keywords: [String]
+
+    var id: TodaySection { section }
+
+    func matches(_ query: String) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return true }
+        return ([title, summary, section.title] + keywords)
+            .joined(separator: " ")
+            .lowercased()
+            .contains(needle)
+    }
+}
+
+/// Today is a constrained group canvas: each entry is a unique, reorderable group, while only groups that
+/// declare multiple supported sizes expose a resize affordance.
+enum TodayGroupCatalog {
+    static let all: [TodayGroupDescriptor] = [
+        .init(
+            section: .hero,
+            title: String(localized: "Daily Scores"),
+            summary: String(localized: "Charge, Effort, and Rest at a glance."),
+            keywords: ["recovery", "strain", "sleep", "readiness"]
+        ),
+        .init(
+            section: .liveSession,
+            title: String(localized: "Quick Start"),
+            summary: String(localized: "Launch a guided live session."),
+            keywords: ["workout", "training", "start"]
+        ),
+        .init(
+            section: .synthesis,
+            title: String(localized: "Synthesis"),
+            summary: String(localized: "A short interpretation of today."),
+            keywords: ["summary", "insight", "readiness"]
+        ),
+        .init(
+            section: .keyMetrics,
+            title: String(localized: "Key Metrics"),
+            summary: String(localized: "Your chosen measurements in a compact grid."),
+            keywords: ["health", "tiles", "grid", "compact"]
+        ),
+        .init(
+            section: .workouts,
+            title: String(localized: "Recent Workouts"),
+            summary: String(localized: "Your latest activity and effort."),
+            keywords: ["training", "activity", "exercise"]
+        ),
+        .init(
+            section: .heartRate,
+            title: String(localized: "Heart Rate"),
+            summary: String(localized: "Live status and the full-day timeline."),
+            keywords: ["bpm", "pulse", "live"]
+        ),
+        .init(
+            section: .recoveryVitals,
+            title: String(localized: "Recovery Vitals"),
+            summary: String(localized: "HRV, resting heart rate, and respiratory rate."),
+            keywords: ["recovery", "hrv", "rhr", "respiratory"]
+        ),
+        .init(
+            section: .yourCards,
+            title: String(localized: "Insights"),
+            summary: String(localized: "Stress, fitness age, vitality, and more."),
+            keywords: ["cards", "stress", "fitness", "vitality"]
+        ),
+        .init(
+            section: .journal,
+            title: String(localized: "Journal"),
+            summary: String(localized: "Daily check-ins and habits."),
+            keywords: ["mood", "habits", "reflection"]
+        ),
+    ]
+}
+
 /// Migrates the pre-registry Today selections exactly once. The version marker is what lets a user add an
 /// intentional duplicate later without the app removing it again on the next launch.
 enum TodayMetricOwnershipMigration {

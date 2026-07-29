@@ -167,6 +167,109 @@ struct TodayRemoveBadge: View {
     }
 }
 
+/// A constrained group-size handle. Horizontal movement snaps between the layouts the group explicitly
+/// supports; it never stores raw geometry, so rotation, iPad width, and Dynamic Type remain safe.
+struct TodayGroupResizeHandle: View {
+    @Binding var size: TodayGroupSize
+    let supportedSizes: [TodayGroupSize]
+    let label: String
+    let coordinateSpace: String
+    let visualOffset: CGSize
+    let onDragChanged: (CGSize) -> Void
+    let onDragEnded: (CGSize) -> Void
+
+    var body: some View {
+        resizeHandleChrome
+        .frame(width: 32, height: 32)
+        .frame(width: 44, height: 44)
+        .offset(visualOffset)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(
+                minimumDistance: 3,
+                coordinateSpace: .named(coordinateSpace)
+            )
+                .onChanged { value in
+                    onDragChanged(value.translation)
+                }
+                .onEnded { value in
+                    onDragEnded(value.translation)
+                }
+        )
+        .accessibilityElement()
+        .accessibilityLabel("Resize \(label)")
+        .accessibilityValue(size.title)
+        .accessibilityHint("Drag inward to make the group smaller or outward to make it larger.")
+        .accessibilityAdjustableAction { direction in
+            guard let currentIndex = supportedSizes.firstIndex(of: size) else { return }
+            switch direction {
+            case .decrement:
+                setSize(at: currentIndex - 1)
+            case .increment:
+                setSize(at: currentIndex + 1)
+            @unknown default: break
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var resizeHandleChrome: some View {
+        if #available(iOS 26.0, *) {
+            TodayBottomTrailingGlassShape()
+                .fill(.white.opacity(0.12))
+                .glassEffect(
+                    .regular.tint(.white.opacity(0.08)).interactive(),
+                    in: TodayBottomTrailingGlassShape()
+                )
+                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+        } else {
+            TodayBottomTrailingGlassShape()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    TodayBottomTrailingGlassShape()
+                        .stroke(.white.opacity(0.32), lineWidth: 0.8)
+                }
+                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+        }
+    }
+
+    private func setSize(at index: Int) {
+        guard !supportedSizes.isEmpty else { return }
+        let clampedIndex = min(max(index, 0), supportedSizes.count - 1)
+        setSize(supportedSizes[clampedIndex])
+    }
+
+    private func setSize(_ next: TodayGroupSize) {
+        guard next != size else { return }
+        StrandHaptic.selection.play()
+        withAnimation(StrandMotion.interactive) {
+            size = next
+        }
+    }
+}
+
+private struct TodayBottomTrailingGlassShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let inset = side * 0.16
+        var centerline = Path()
+        centerline.addArc(
+            center: CGPoint(x: rect.minX + inset, y: rect.minY + inset),
+            radius: side - inset * 2,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        return centerline.strokedPath(
+            StrokeStyle(
+                lineWidth: side * 0.24,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
+    }
+}
+
 /// Weakly locates SwiftUI's enclosing vertical UIScrollView so a card held near an edge can continue
 /// moving through the Today feed. UIKit remains in the app layer; no UIKit enters StrandDesign.
 @MainActor

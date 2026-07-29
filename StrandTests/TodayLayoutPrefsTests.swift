@@ -97,6 +97,59 @@ final class TodayLayoutPrefsTests: XCTestCase {
         )
     }
 
+    func testGroupCatalogCoversEveryTodaySection() {
+        XCTAssertEqual(
+            Set(TodayGroupCatalog.all.map(\.section)),
+            Set(TodaySection.allCases)
+        )
+        XCTAssertEqual(
+            TodayGroupCatalog.all.count,
+            Set(TodayGroupCatalog.all.map(\.section)).count
+        )
+    }
+
+    func testGroupSizesPersistOnlySupportedNonDefaultValues() {
+        XCTAssertEqual(
+            TodayGroupLayoutPrefs.size(for: .keyMetrics, raw: ""),
+            .large
+        )
+        let wide = TodayGroupLayoutPrefs.setting(
+            .wide,
+            for: .keyMetrics,
+            raw: ""
+        )
+        XCTAssertEqual(wide, "keyMetrics=wide")
+        XCTAssertEqual(
+            TodayGroupLayoutPrefs.size(for: .keyMetrics, raw: wide),
+            .wide
+        )
+        XCTAssertEqual(
+            TodayGroupLayoutPrefs.setting(.small, for: .hero, raw: wide),
+            wide,
+            "Groups without a small design must reject arbitrary sizing"
+        )
+        XCTAssertEqual(
+            TodayGroupLayoutPrefs.setting(.large, for: .keyMetrics, raw: wide),
+            ""
+        )
+        XCTAssertEqual(TodaySection.workouts.supportedGroupSizes, [.small, .wide])
+        XCTAssertEqual(TodaySection.heartRate.supportedGroupSizes, [.small, .wide])
+        XCTAssertEqual(TodaySection.recoveryVitals.supportedGroupSizes, [.small, .wide])
+        XCTAssertEqual(TodaySection.keyMetrics.supportedGroupSizes, [.small, .wide, .large])
+        XCTAssertEqual(TodayGroupSize.small.columnSpan, 1)
+        XCTAssertEqual(TodayGroupSize.wide.columnSpan, 2)
+        XCTAssertEqual(TodayGroupSize.large.columnSpan, 2)
+    }
+
+    func testGroupSizeDecoderDropsUnknownUnsupportedAndDefaultEntries() {
+        XCTAssertEqual(
+            TodayGroupLayoutPrefs.decode(
+                "keyMetrics=wide,hero=small,workouts=wide,nope=small,keyMetrics=huge"
+            ),
+            [.keyMetrics: .wide]
+        )
+    }
+
     func testEditableLayoutHidesAndRestoresWithoutDeleting() {
         var draft = EditableLayoutDraft(
             visible: TodaySection.defaultOrder,
@@ -226,6 +279,18 @@ final class TodayLayoutPrefsTests: XCTestCase {
         XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 4), 2)
         XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 5), 3)
         XCTAssertEqual(KeyMetricGridLayout.columnCount(itemCount: 6), 3)
+        XCTAssertEqual(
+            KeyMetricGridLayout.columnCount(itemCount: 4, groupSize: .small),
+            2
+        )
+        XCTAssertEqual(
+            KeyMetricGridLayout.columnCount(itemCount: 7, groupSize: .wide),
+            4
+        )
+        XCTAssertEqual(
+            KeyMetricGridLayout.columnCount(itemCount: 4, groupSize: .large),
+            2
+        )
     }
 
     func testExternalCatalogMetricsRequireDataFromTheirExactSource() {

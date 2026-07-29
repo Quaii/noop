@@ -142,6 +142,17 @@ enum KeyMetricGridLayout {
         default: return 3
         }
     }
+
+    static func columnCount(itemCount: Int, groupSize: TodayGroupSize) -> Int {
+        switch groupSize {
+        case .small:
+            return min(2, max(1, itemCount))
+        case .wide:
+            return min(4, max(1, itemCount))
+        case .large:
+            return columnCount(itemCount: itemCount)
+        }
+    }
 }
 
 struct CatalogKeyMetricSnapshot {
