@@ -56,6 +56,12 @@
     <string name="today_customize_move_down">下移%1$s</string>
     <string name="today_customize_hide">隐藏%1$s</string>
     <string name="today_customize_show">显示%1$s</string>
+    <string name="today_hide_recovery_vitals_title">隐藏恢复生命体征？</string>
+    <string name="today_hide_recovery_vitals_message">恢复生命体征汇总 HRV、静息心率和呼吸频率。请选择是否将这些测量值作为单独卡片保留在“今天”。</string>
+    <string name="today_add_missing_vitals">添加缺少的生命体征</string>
+    <string name="today_cancel">取消</string>
+    <string name="today_hide_only">仅隐藏</string>
+    <string name="today_no_heart_rate_yet">暂无心率数据。腕带同步后曲线会显示。</string>
     <string name="terms_title">在使用 NOOP 之前</string>
     <string name="terms_subtitle">请仔细阅读以下要点，并确认每一项声明。</string>
     <string name="terms_point_independent_head">独立开发：与 WHOOP 无关</string>

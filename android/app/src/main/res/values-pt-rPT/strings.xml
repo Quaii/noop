@@ -58,6 +58,12 @@
     <string name="today_customize_move_down">Mover %1$s para baixo</string>
     <string name="today_customize_hide">Ocultar %1$s</string>
     <string name="today_customize_show">Mostrar %1$s</string>
+    <string name="today_hide_recovery_vitals_title">Ocultar sinais vitais de recuperação?</string>
+    <string name="today_hide_recovery_vitals_message">Os sinais vitais de recuperação agrupam a VFC, a frequência cardíaca em repouso e a frequência respiratória. Escolhe se estas medições devem permanecer em Hoje como mosaicos individuais.</string>
+    <string name="today_add_missing_vitals">Adicionar sinais vitais em falta</string>
+    <string name="today_cancel">Cancelar</string>
+    <string name="today_hide_only">Ocultar apenas</string>
+    <string name="today_no_heart_rate_yet">Ainda não existem dados de frequência cardíaca. A curva será preenchida após a sincronização da pulseira.</string>
     <string name="terms_title">Antes de utilizar o NOOP</string>
     <string name="terms_subtitle">Lê os pontos abaixo e confirma cada afirmação.</string>
     <string name="terms_point_independent_head">Independente: não afiliado à WHOOP</string>

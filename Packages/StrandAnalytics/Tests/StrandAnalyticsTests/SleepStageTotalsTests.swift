@@ -5,6 +5,27 @@ import WhoopProtocol
 @testable import StrandAnalytics
 
 final class SleepStageTotalsTests: XCTestCase {
+    func testRestorativePercentageUsesDeepAndRemOverTotalSleep() throws {
+        XCTAssertEqual(
+            try XCTUnwrap(
+                SleepStageTotals.restorativePercentage(
+                    deepMin: 80,
+                    remMin: 100,
+                    totalSleepMin: 400
+                )
+            ),
+            45,
+            accuracy: 0.0001
+        )
+        XCTAssertNil(
+            SleepStageTotals.restorativePercentage(
+                deepMin: 80,
+                remMin: 100,
+                totalSleepMin: 0
+            )
+        )
+    }
+
 
     func testMinutesFromSegmentArray() throws {
         let json = """

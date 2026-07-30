@@ -3,6 +3,15 @@ import XCTest
 import WhoopStore
 
 final class ReadinessEngineTests: XCTestCase {
+    func testTrainingLoadBandsMatchTheDocumentedSweetSpot() {
+        XCTAssertEqual(ReadinessEngine.trainingLoadBand(acwr: nil), .insufficient)
+        XCTAssertEqual(ReadinessEngine.trainingLoadBand(acwr: 0.79), .rampingDown)
+        XCTAssertEqual(ReadinessEngine.trainingLoadBand(acwr: 0.8), .balanced)
+        XCTAssertEqual(ReadinessEngine.trainingLoadBand(acwr: 1.29), .balanced)
+        XCTAssertEqual(ReadinessEngine.trainingLoadBand(acwr: 1.3), .buildingFast)
+        XCTAssertEqual(ReadinessEngine.trainingLoadBand(acwr: 1.5), .high)
+    }
+
 
     private func d(_ i: Int, hrv: Double?, rhr: Int?, strain: Double?, resp: Double? = nil) -> DailyMetric {
         DailyMetric(day: String(format: "2024-03-%02d", i), totalSleepMin: nil, efficiency: nil,

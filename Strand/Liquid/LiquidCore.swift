@@ -286,7 +286,7 @@ func liquidWave(_ x: Double, amp: Double, R: Double, hw: Double,
 /// A monotonic seconds clock for a TimelineView date.
 @inline(__always) func liquidSeconds(_ date: Date) -> Double { date.timeIntervalSinceReferenceDate }
 
-// MARK: - Low Power Mode
+// MARK: - Continuous-effect budget
 
 /// Publishes Low Power Mode so the live gauges can pose still, the way they already do for
 /// Reduce Motion. There is no SwiftUI environment key for this, so the primitives observe this
@@ -300,9 +300,21 @@ func liquidWave(_ x: Double, amp: Double, R: Double, hw: Double,
 final class LiquidPowerMonitor: ObservableObject {
     static let shared = LiquidPowerMonitor()
     @Published private(set) var isLowPower: Bool
+    /// Screen recording / AirPlay capture adds a second full-frame render + encode pass. Keeping the
+    /// decorative 30/60-fps canvases alive at the same time is needless contention on a real device.
+    @Published private(set) var isScreenCaptured: Bool
+
+    var reducesContinuousEffects: Bool {
+        isLowPower || isScreenCaptured
+    }
 
     private init() {
         isLowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        #if canImport(UIKit)
+        isScreenCaptured = UIScreen.main.isCaptured
+        #else
+        isScreenCaptured = false
+        #endif
         NotificationCenter.default.addObserver(
             forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
         ) { [weak self] _ in
@@ -310,5 +322,15 @@ final class LiquidPowerMonitor: ObservableObject {
                 self?.isLowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }
         }
+        #if canImport(UIKit)
+        NotificationCenter.default.addObserver(
+            forName: UIScreen.capturedDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                let screen = notification.object as? UIScreen
+                self?.isScreenCaptured = (screen ?? UIScreen.main).isCaptured
+            }
+        }
+        #endif
     }
 }

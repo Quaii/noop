@@ -74,6 +74,8 @@ public enum StrandPalette {
     public static let surfaceInset   = Color(light: "#E9E9EE", dark: "#1F2229") // wells / chart insets / segmented track
     public static let hairline       = Color(light: "#D8D0BD", dark: "#21304A") // soft 1px border (stronger on light for card edges)
     public static let hairlineStrong = Color(light: "#C7BCA4", dark: "#2E3C57") // hover / emphasis border
+    /// Neutral elevation shadow. Keeping this semantic prevents screen code from reaching for
+    /// `Color.black` when it needs to lift a shared piece of chrome above a surface.
 
     // MARK: Text — deep navy-ink on paper / cool off-white on navy
     public static let textPrimary    = Color(light: "#1A2230", dark: "#F4F6F8")

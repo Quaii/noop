@@ -55,16 +55,24 @@ public enum NoopMetrics {
     /// Minimum desktop size for a navigation-based customization sheet.
     public static let editorSheetMinWidth: CGFloat = 440
     public static let editorSheetMinHeight: CGFloat = 600
+    /// Compact circular action used beside gallery rows. Its visible chrome stays small while the
+    /// surrounding control preserves the platform minimum touch target.
+    public static let compactIconButtonSize: CGFloat = 28
+    public static let compactIconButtonHitTarget: CGFloat = 44
 
     /// Geometry for direct Today-section editing. The screen composes these shared values rather than
     /// inventing gesture and lift dimensions alongside its content.
     public enum TodayReorder {
+        /// The single vertical rhythm between neighbouring Today groups. The outer feed and the
+        /// two-column editor canvas both use this value so moving a group never changes its spacing.
+        public static let groupSpacing: CGFloat = NoopMetrics.gap
         /// Edge band where a lifted section begins scrolling the Today feed.
         public static let autoScrollZone: CGFloat = 96
         /// Maximum feed travel while a section is held at a viewport edge, in points per second.
         public static let autoScrollMaxSpeed: CGFloat = 520
-        /// A small movement allowance lets an ordinary vertical flick fail the hold and remain a scroll.
-        public static let holdMovementTolerance: CGFloat = NoopMetrics.space3
+        /// Cancel pickup before the enclosing ScrollView's pan threshold. A larger tolerance made a slow
+        /// edit-mode scroll indistinguishable from holding a card to rearrange it on a physical device.
+        public static let holdMovementTolerance: CGFloat = NoopMetrics.space2
         /// Subtle lift that distinguishes the card under the finger without resizing the layout.
         public static let liftScale: CGFloat = 1.015
         /// Large full-width cards need a quieter edit wiggle than compact metric tiles.
@@ -82,6 +90,28 @@ public enum NoopMetrics {
         public static let removeBadgeHitTarget: CGFloat = 34
         public static let removeBadgeInset: CGFloat = 2
         public static let removeBadgeOffset: CGFloat = 7
+
+        /// Geometry and feel for the group resize grabber. The drawn arc stays compact while its touch
+        /// target remains a comfortable 44 points.
+        public static let resizeHandleVisualSize: CGFloat = 32
+        public static let resizeHandleHitTarget: CGFloat = 44
+        /// How far the grabber straddles its group's bottom-trailing corner.
+        public static let resizeHandleOffset: CGFloat = NoopMetrics.space3
+        /// Drag distance that grows a full-width group into its tall footprint. Width travel is measured
+        /// from the live canvas; height has no such natural span, so it is a tuned constant.
+        public static let resizeVerticalTravel: CGFloat = 110
+        /// Movement required before the grabber claims the gesture, small enough to feel immediate.
+        public static let resizeMinimumDragDistance: CGFloat = 3
+        /// While a group swaps between two genuinely different layouts, its content blurs and dips rather
+        /// than hard-cutting. Depth is how far the opacity falls; half-width is how much of the ladder the
+        /// transition occupies on each side of the boundary.
+        public static let resizeSwapBlur: CGFloat = 7
+        /// Fully hide the old content at the detent so a structurally different layout can replace it
+        /// without a visible hard cut, then fade the new content back in as the drag continues.
+        /// Keep the outgoing layout perceptible while it is blurred. A full fade left an empty card
+        /// between detents on a real device, especially for Last Workout's compact/detail swap.
+        public static let resizeSwapFadeDepth: Double = 0.42
+        public static let resizeSwapHalfWidth: CGFloat = 0.26
     }
 
     /// Optical corner-radius tiers for the mixed card sizes on Today. A short action row should not
@@ -95,6 +125,24 @@ public enum NoopMetrics {
         public static let standardRadius: CGFloat = NoopMetrics.cardRadius
         /// The oversized Charge / Effort / Rest hero.
         public static let heroRadius: CGFloat = 26
+    }
+
+    /// Shared geometry for the compact/detail groups in Today's gallery. These values are intentionally
+    /// semantic because the same real component renders in the gallery and on the Today canvas.
+    public enum TodayWidget {
+        public static let headlineNumberSize: CGFloat = 22
+        public static let rowNumberSize: CGFloat = 15
+        public static let iconSymbolSize: CGFloat = 16
+        public static let iconColumnWidth: CGFloat = 22
+        public static let denseSpacing: CGFloat = 2
+        public static let baselineSpacing: CGFloat = 6
+        public static let contentSpacing: CGFloat = NoopMetrics.rowSpacing
+        public static let compactVesselSize: CGFloat = 34
+        public static let galleryPreviewMinimumHeight: CGFloat = 120
+        public static let stageSpacing: CGFloat = NoopMetrics.space1 / 2
+        public static let progressHeight: CGFloat = NoopMetrics.rowSpacing
+        public static let progressRadius: CGFloat = 3
+        public static let minimumProgressSegmentWidth: CGFloat = NoopMetrics.space1 / 2
     }
 }
 
@@ -134,17 +182,36 @@ public extension View {
 public struct NoopCard<Content: View>: View {
     private let padding: CGFloat
     private let tint: Color?
+    private let cornerRadius: CGFloat
+    private let fillsHeight: Bool
+    private let surfaceOpacity: Double
     @ViewBuilder private let content: () -> Content
     #if os(macOS)
     @State private var hover = false
     #endif
-    public init(padding: CGFloat = NoopMetrics.cardPadding, tint: Color? = nil, @ViewBuilder content: @escaping () -> Content) {
-        self.padding = padding; self.tint = tint; self.content = content
+    public init(
+        padding: CGFloat = NoopMetrics.cardPadding,
+        tint: Color? = nil,
+        cornerRadius: CGFloat = NoopMetrics.cardRadius,
+        fillsHeight: Bool = false,
+        surfaceOpacity: Double = 1,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.padding = padding
+        self.tint = tint
+        self.cornerRadius = cornerRadius
+        self.fillsHeight = fillsHeight
+        self.surfaceOpacity = surfaceOpacity
+        self.content = content
     }
     public var body: some View {
         content()
             .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: fillsHeight ? .infinity : nil,
+                alignment: .topLeading
+            )
             // Hover chrome (fill + border + shadow) lives in the background so its animation is
             // scoped to the card surface ONLY. It must never animate the content() subtree, or a
             // chart inside re-animates its line every time the cursor crosses the card. (#104)
@@ -159,18 +226,103 @@ public struct NoopCard<Content: View>: View {
     // count on every card, which multiplies across long scrolling lists. macOS adds the
     // hover emphasis border on top (with the #104 animation scoping) unchanged.
     @ViewBuilder private var cardSurface: some View {
-        let shape = RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         #if os(macOS)
-        FrostedCardSurface(tint: tint, cornerRadius: NoopMetrics.cardRadius)
+        FrostedCardSurface(tint: tint, cornerRadius: cornerRadius)
             .overlay(
                 shape.strokeBorder(StrandPalette.hairlineStrong, lineWidth: 1).opacity(hover ? 1 : 0)
             )
             .animation(.easeOut(duration: 0.16), value: hover)
+            .opacity(surfaceOpacity)
         #else
-        FrostedCardSurface(tint: tint, cornerRadius: NoopMetrics.cardRadius)
+        FrostedCardSurface(tint: tint, cornerRadius: cornerRadius)
+            .opacity(surfaceOpacity)
         #endif
     }
 }
+
+// MARK: - Compact icon action
+
+/// Shared circular icon control for compact row actions such as configure, add, remove and confirm.
+/// The visible disc is intentionally smaller than its hit target, so screens never have to trade density
+/// for accessibility or rebuild this chrome with one-off circles and font sizes.
+public struct NoopIconButton: View {
+    public enum Kind: Equatable {
+        case secondary
+        case positive
+        case destructive
+    }
+
+    private let accessibilityLabel: LocalizedStringKey
+    private let systemImage: String
+    private let kind: Kind
+    private let action: () -> Void
+
+    public init(
+        _ accessibilityLabel: LocalizedStringKey,
+        systemImage: String,
+        kind: Kind = .secondary,
+        action: @escaping () -> Void
+    ) {
+        self.accessibilityLabel = accessibilityLabel
+        self.systemImage = systemImage
+        self.kind = kind
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(StrandFont.caption.weight(.bold))
+                .foregroundStyle(labelColor)
+                .frame(
+                    width: NoopMetrics.compactIconButtonSize,
+                    height: NoopMetrics.compactIconButtonSize
+                )
+                .background(fillColor, in: Circle())
+                .overlay {
+                    if kind == .secondary {
+                        Circle().strokeBorder(StrandPalette.hairline)
+                    }
+                }
+                .frame(
+                    width: NoopMetrics.compactIconButtonHitTarget,
+                    height: NoopMetrics.compactIconButtonHitTarget
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var fillColor: Color {
+        switch kind {
+        case .secondary: return StrandPalette.surfaceInset
+        case .positive: return StrandPalette.statusPositive
+        case .destructive: return StrandPalette.statusCritical
+        }
+    }
+
+    private var labelColor: Color {
+        switch kind {
+        case .secondary: return StrandPalette.accent
+        case .positive, .destructive: return StrandPalette.goldDeepText
+        }
+    }
+}
+
+#if DEBUG
+#Preview("Compact design-system actions") {
+    HStack(spacing: NoopMetrics.space2) {
+        NoopIconButton("Configure", systemImage: "slider.horizontal.3") {}
+        NoopIconButton("Added", systemImage: "checkmark", kind: .positive) {}
+        NoopIconButton("Remove", systemImage: "minus", kind: .destructive) {}
+    }
+    .padding(NoopMetrics.space4)
+    .background(StrandPalette.surfaceBase)
+    .preferredColorScheme(.dark)
+}
+#endif
 
 // MARK: - Section header
 

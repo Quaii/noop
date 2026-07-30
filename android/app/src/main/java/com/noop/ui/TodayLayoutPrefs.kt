@@ -17,8 +17,11 @@ import android.content.Context
 // visibility lives separately in "today.hiddenSections", byte-identical to the Apple-platform key.
 
 /**
- * One reorderable Today section. The [raw] is the stable persisted identifier — keep it byte-identical to
- * the macOS `TodaySection` enum so a backup/restore reads the same layout on either OS.
+ * One reorderable Today section. For sections both platforms render, [raw] is the stable persisted
+ * identifier and stays byte-identical to the macOS `TodaySection` case.
+ *
+ * Apple-only gallery groups deliberately do not appear here. Android adds a section only when Compose has
+ * a real renderer for it; persisting unsupported identities would create invisible layout state.
  */
 enum class TodaySection(val raw: String, val title: String) {
     HERO("hero", "Charge / Effort / Rest"),
@@ -29,7 +32,8 @@ enum class TodaySection(val raw: String, val title: String) {
     HEART_RATE("heartRate", "Heart Rate"),
     RECOVERY_VITALS("recoveryVitals", "Recovery Vitals"),
     YOUR_CARDS("yourCards", "Your Cards"),
-    JOURNAL("journal", "Journal");
+    JOURNAL("journal", "Journal"),
+    DATA_SOURCES("dataSources", "Data Sources");
 
     companion object {
         fun fromRaw(raw: String?): TodaySection? = entries.firstOrNull { it.raw == raw }
@@ -38,7 +42,7 @@ enum class TodaySection(val raw: String, val title: String) {
          *  journal widget (#656) is last by default, where it was first added, above the data-sources card. */
         val defaultOrder: List<TodaySection> = listOf(
             HERO, LIVE_SESSION, SYNTHESIS, KEY_METRICS, WORKOUTS, HEART_RATE, RECOVERY_VITALS, YOUR_CARDS,
-            JOURNAL,
+            JOURNAL, DATA_SOURCES,
         )
     }
 }

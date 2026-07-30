@@ -62,6 +62,12 @@
     <string name="today_customize_move_down">%1$s nach unten verschieben</string>
     <string name="today_customize_hide">%1$s ausblenden</string>
     <string name="today_customize_show">%1$s anzeigen</string>
+    <string name="today_hide_recovery_vitals_title">Erholungswerte ausblenden?</string>
+    <string name="today_hide_recovery_vitals_message">Erholungswerte gruppiert HRV, Ruheherzfrequenz und Atemfrequenz. Wähle, ob diese Messwerte auf Heute als einzelne Kacheln erhalten bleiben sollen.</string>
+    <string name="today_add_missing_vitals">Fehlende Werte hinzufügen</string>
+    <string name="today_cancel">Abbrechen</string>
+    <string name="today_hide_only">Nur ausblenden</string>
+    <string name="today_no_heart_rate_yet">Noch keine Herzfrequenzdaten. Die Kurve wird nach der Synchronisierung des Bands angezeigt.</string>
 
     <!-- First-run Terms gate (clickwrap). Wording kept identical to the iOS German entries in
          Localizable.xcstrings (PR #984) so both platforms present the same text. The German gate is

@@ -10,6 +10,14 @@ import StrandDesign
 /// unknown (we never invent mg), the active hint covers the dose-unknown case in words, and the copy
 /// states it's an estimate from what was logged.
 struct CaffeineLogCard: View {
+    enum Presentation {
+        case full
+        case compact
+        case wide
+    }
+
+    var presentation: Presentation = .full
+
     /// Single-user state owned here (UserDefaults-backed), so hosting needs no app-level injection.
     @StateObject private var store = CaffeineLogStore()
 
@@ -31,57 +39,98 @@ struct CaffeineLogCard: View {
     static let bedtimeMinutesKey = "noop.caffeine.bedtimeMinutes"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Caffeine", overline: "Log")
-            NoopCard(tint: StrandPalette.accent) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Log a coffee, tea, or energy drink and NOOP shows a rough estimate of how much may still be active. It's a guide based on a typical 5 to 6 hour half-life, not a measurement.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+        Group {
+            switch presentation {
+            case .full:
+                VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                    SectionHeader("Caffeine", overline: "Log")
+                    NoopCard(tint: StrandPalette.accent) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Log a coffee, tea, or energy drink and NOOP shows a rough estimate of how much may still be active. It's a guide based on a typical 5 to 6 hour half-life, not a measurement.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
 
-                    activeHint
+                            activeHint
 
-                    // PR#566 — the late-intake nudge sits right under the active hint when the cutoff is on
-                    // and a logged intake is past it, so the timing warning is the first thing read.
-                    lateIntakeNudge
+                            // PR#566 — the late-intake nudge sits right under the active hint when the cutoff is on
+                            // and a logged intake is past it, so the timing warning is the first thing read.
+                            lateIntakeNudge
 
-                    Divider().overlay(StrandPalette.hairline)
+                            Divider().overlay(StrandPalette.hairline)
 
-                    // Optional amount — leave blank if you don't know it. We never invent a number.
-                    HStack {
-                        TextField("Amount in mg (optional)", text: $mgDraft)
-                            .textFieldStyle(.roundedBorder)
-                        #if os(iOS)
-                            .keyboardType(.numberPad)
-                        #endif
-                        Text("mg")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                    }
+                            // Optional amount — leave blank if you don't know it. We never invent a number.
+                            HStack {
+                                TextField("Amount in mg (optional)", text: $mgDraft)
+                                    .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                                    .keyboardType(.numberPad)
+                                #endif
+                                Text("mg")
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
 
-                    // Log "now" or a quick number of hours ago — mirrors the journal's day-pill row.
-                    HStack {
-                        Text("Had it")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                        Spacer()
-                        ForEach(quickHoursAgo, id: \.self) { h in
-                            logPill(h == 0 ? "Now" : "\(h)h ago", hoursAgo: h)
+                            // Log "now" or a quick number of hours ago — mirrors the journal's day-pill row.
+                            HStack {
+                                Text("Had it")
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                Spacer()
+                                ForEach(quickHoursAgo, id: \.self) { h in
+                                    logPill(h == 0 ? "Now" : "\(h)h ago", hoursAgo: h)
+                                }
+                            }
+
+                            Divider().overlay(StrandPalette.hairline)
+                            cutoffSection
+
+                            if !store.intakes.isEmpty {
+                                Divider().overlay(StrandPalette.hairline)
+                                loggedList
+                            }
                         }
                     }
-
-                    Divider().overlay(StrandPalette.hairline)
-                    cutoffSection
-
-                    if !store.intakes.isEmpty {
-                        Divider().overlay(StrandPalette.hairline)
-                        loggedList
-                    }
                 }
+            case .compact:
+                embeddedSummary(showsDetail: false)
+            case .wide:
+                embeddedSummary(showsDetail: true)
             }
         }
         .onReceive(ticker) { tick = $0 }
+    }
+
+    /// The Today widget presentation uses the same store and decay model as the full logger, but leaves
+    /// section/card chrome to its host and omits the form controls that cannot fit a widget footprint.
+    private func embeddedSummary(showsDetail: Bool) -> some View {
+        let estimate = store.estimate()
+        let todayCount = store.intakes.filter { Calendar.current.isDateInToday($0.at) }.count
+        return VStack(alignment: .leading, spacing: 6) {
+            if estimate.hasActive {
+                Text(activeTitle(estimate))
+                    .font(StrandFont.number(20))
+                    .foregroundStyle(StrandPalette.metricAmber)
+                    .lineLimit(2)
+                if showsDetail {
+                    Text(activeDetail(estimate))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(2)
+                }
+            } else {
+                Text("No active caffeine")
+                    .font(StrandFont.number(20))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                if showsDetail {
+                    Text(todayCount == 0 ? "Nothing logged today" : "Estimated mostly cleared")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Cutoff window (PR#566) — bedtime + late-intake nudge

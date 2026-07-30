@@ -1,4 +1,5 @@
 import XCTest
+import WhoopStore
 @testable import Strand
 
 /// Twin of the Android `TodayLayoutPrefsTest` (#today-layout): default order, encode/decode round-trip,
@@ -18,7 +19,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
         ]
         let encoded = TodayLayoutPrefs.encode(reordered)
         XCTAssertEqual(encoded, "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal")
-        XCTAssertEqual(TodayLayoutPrefs.decodeOrder(encoded), reordered)
+        XCTAssertEqual(classic(TodayLayoutPrefs.decodeOrder(encoded)), reordered)
     }
 
     /// The v1 upgrade path: an order saved by the FIRST cut (6 sections — no hero/liveSession, which were
@@ -27,16 +28,26 @@ final class TodayLayoutPrefsTests: XCTestCase {
     func testSavedOrderFromFirstCutInsertsHeroAndSessionAtTheirDefaultPosition() {
         let firstCut = "synthesis,keyMetrics,workouts,heartRate,recoveryVitals,yourCards"
         XCTAssertEqual(
-            TodayLayoutPrefs.decodeOrder(firstCut),
+            classic(TodayLayoutPrefs.decodeOrder(firstCut)),
             // journal(8) follows everything saved → appended.
             [.hero, .liveSession, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards, .journal]
         )
     }
 
+    /// These ordering tests predate the widget library and are about where the ORIGINAL nine sections
+    /// land relative to each other. Every library addition is, by construction, a section missing from
+    /// those saved strings, so `decodeOrder` correctly inserts every library addition into every result. Filtering
+    /// them out keeps each assertion testing what it was written to test; `testDefaultOrderCoversEveryCase`
+    /// and `testLibraryAdditionsShipHidden` cover the additions themselves.
+    private func classic(_ sections: [TodaySection]) -> [TodaySection] {
+        let laterAdditions = Set(TodaySection.libraryAdditions + [.dataSources])
+        return sections.filter { !laterAdditions.contains($0) }
+    }
+
     func testInsertsAnyMissingSectionAtItsDefaultPositionRelativeToSaved() {
         let partial = "heartRate,synthesis,keyMetrics,recoveryVitals"
         XCTAssertEqual(
-            TodayLayoutPrefs.decodeOrder(partial),
+            classic(TodayLayoutPrefs.decodeOrder(partial)),
             [.hero, .liveSession, .workouts, .heartRate, .synthesis, .keyMetrics, .recoveryVitals, .yourCards, .journal]
         )
     }
@@ -44,7 +55,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
     func testDropsUnknownTokensAndCollapsesDuplicates() {
         let messy = "yourCards,BOGUS,yourCards,heartRate, ,heartRate"
         XCTAssertEqual(
-            TodayLayoutPrefs.decodeOrder(messy),
+            classic(TodayLayoutPrefs.decodeOrder(messy)),
             [.hero, .liveSession, .synthesis, .keyMetrics, .workouts, .recoveryVitals, .yourCards, .heartRate, .journal]
         )
     }
@@ -62,10 +73,10 @@ final class TodayLayoutPrefsTests: XCTestCase {
     func testVisibleOrderFiltersHiddenWithoutChangingSavedOrder() {
         let order = "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal"
         XCTAssertEqual(
-            TodayLayoutPrefs.visibleOrder(orderRaw: order, hiddenRaw: "hero,workouts"),
+            classic(TodayLayoutPrefs.visibleOrder(orderRaw: order, hiddenRaw: "hero,workouts")),
             [.heartRate, .yourCards, .liveSession, .synthesis, .keyMetrics, .recoveryVitals, .journal]
         )
-        XCTAssertEqual(TodayLayoutPrefs.decodeOrder(order), [
+        XCTAssertEqual(classic(TodayLayoutPrefs.decodeOrder(order)), [
             .heartRate, .hero, .yourCards, .liveSession, .synthesis, .keyMetrics, .workouts,
             .recoveryVitals, .journal,
         ])
@@ -93,8 +104,68 @@ final class TodayLayoutPrefsTests: XCTestCase {
         // Pin the exact wire strings — they must match the Android TodaySection byte-for-byte.
         XCTAssertEqual(
             raws,
-            ["hero", "liveSession", "synthesis", "keyMetrics", "workouts", "heartRate", "recoveryVitals", "yourCards", "journal"]
+            [
+                "hero", "liveSession", "synthesis", "keyMetrics", "workouts", "heartRate",
+                "recoveryVitals", "yourCards", "journal", "dataSources",
+                "sleepSummary", "sleepStages", "restorativeSleep", "sleepEfficiency",
+                "sleepDisturbances", "deepSleep", "remSleep", "lightSleep", "sleepDebt",
+                "recoveryForecast", "trainingLoad", "activity", "stepsToday", "activeEnergy",
+                "sessionsToday", "heartRateZones", "stressToday", "stressLevel",
+                "fitnessAgeSummary", "vitalityScore", "hydration", "caffeine",
+                "overnightVitals", "skinTemperature",
+                "bodyClock", "cycleAwareness", "weeklyDigest", "streaks",
+            ]
         )
+    }
+
+    /// The library must arrive OPT-IN. Absence from the hidden set means visible, so without this seeding
+    /// an update would drop unrequested groups onto every existing Today.
+    func testLibraryAdditionsShipHidden() {
+        let seeded = TodayLayoutPrefs.seedingLibraryAdditions(hiddenRaw: "")
+        let hidden = Set(TodayLayoutPrefs.decodeHidden(seeded))
+        XCTAssertEqual(hidden, Set(TodaySection.libraryAdditions))
+        XCTAssertEqual(TodaySection.libraryAdditions.count, 28)
+        // A fresh install therefore renders exactly the sections it rendered before the library existed.
+        XCTAssertEqual(
+            TodayLayoutPrefs.visibleOrder(orderRaw: "", hiddenRaw: seeded),
+            [.hero, .liveSession, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals,
+             .yourCards, .journal, .dataSources]
+        )
+    }
+
+    func testSeedingPreservesAnExistingHiddenSetAndIsIdempotent() {
+        let once = TodayLayoutPrefs.seedingLibraryAdditions(hiddenRaw: "workouts")
+        XCTAssertTrue(TodayLayoutPrefs.decodeHidden(once).contains(.workouts))
+        // Re-running must not duplicate entries, so an owner who un-hides a group keeps it un-hidden.
+        XCTAssertEqual(TodayLayoutPrefs.seedingLibraryAdditions(hiddenRaw: once), once)
+    }
+
+    func testSecondLibraryMigrationDoesNotRehideAVisibleFirstGenerationGroup() {
+        let hidden = TodayLayoutPrefs.seeding(
+            TodaySection.libraryAdditionsV2,
+            hiddenRaw: ""
+        )
+        let decoded = Set(TodayLayoutPrefs.decodeHidden(hidden))
+        XCTAssertEqual(decoded, Set(TodaySection.libraryAdditionsV2))
+        XCTAssertFalse(decoded.contains(.sleepSummary))
+        XCTAssertFalse(decoded.contains(.heartRateZones))
+    }
+
+    func testEveryLibraryAdditionDeclaresItsFootprintsAndCatalogEntry() {
+        for section in TodaySection.libraryAdditions {
+            XCTAssertFalse(
+                section.supportedGroupSizes.isEmpty,
+                "\(section.rawValue) must declare at least one footprint"
+            )
+            XCTAssertTrue(
+                section.supportedGroupSizes.contains(section.defaultGroupSize),
+                "\(section.rawValue) must support the size it defaults to"
+            )
+            XCTAssertTrue(
+                TodayGroupCatalog.all.contains { $0.section == section },
+                "\(section.rawValue) must be listed in the gallery or it can never be added"
+            )
+        }
     }
 
     func testGroupCatalogCoversEveryTodaySection() {
@@ -136,6 +207,9 @@ final class TodayLayoutPrefsTests: XCTestCase {
         XCTAssertEqual(TodaySection.heartRate.supportedGroupSizes, [.small, .wide])
         XCTAssertEqual(TodaySection.recoveryVitals.supportedGroupSizes, [.small, .wide])
         XCTAssertEqual(TodaySection.keyMetrics.supportedGroupSizes, [.small, .wide, .large])
+        XCTAssertEqual(TodaySection.heartRateZones.supportedGroupSizes, [.small, .wide, .large])
+        XCTAssertEqual(TodaySection.yourCards.supportedGroupSizes, [.wide, .large])
+        XCTAssertEqual(TodaySection.yourCards.defaultGroupSize, .large)
         XCTAssertEqual(TodayGroupSize.small.columnSpan, 1)
         XCTAssertEqual(TodayGroupSize.wide.columnSpan, 2)
         XCTAssertEqual(TodayGroupSize.large.columnSpan, 2)
@@ -188,6 +262,35 @@ final class TodayLayoutPrefsTests: XCTestCase {
         XCTAssertEqual(Set(KeyMetric.defaultOrder), Set(KeyMetric.allCases))
     }
 
+    func testKeyMetricReorderAcceptsAnExactPermutation() {
+        let enabled: [KeyMetric] = [.bloodOxygen, .steps, .calories]
+        XCTAssertEqual(
+            KeyMetricPrefs.validatedReorder(
+                [.calories, .bloodOxygen, .steps],
+                preserving: enabled
+            ),
+            [.calories, .bloodOxygen, .steps]
+        )
+    }
+
+    func testKeyMetricReorderRejectsSnapshotsThatWouldHideACard() {
+        let enabled: [KeyMetric] = [.bloodOxygen, .steps, .calories]
+        XCTAssertEqual(
+            KeyMetricPrefs.validatedReorder(
+                [.calories, .bloodOxygen],
+                preserving: enabled
+            ),
+            enabled
+        )
+        XCTAssertEqual(
+            KeyMetricPrefs.validatedReorder(
+                [.calories, .calories, .steps],
+                preserving: enabled
+            ),
+            enabled
+        )
+    }
+
     func testFreshYourCardsContainsDerivedInsightsOnly() {
         XCTAssertEqual(
             DashboardCardPrefs.decodeEnabled(""),
@@ -235,7 +338,12 @@ final class TodayLayoutPrefsTests: XCTestCase {
     func testCleanDefaultsHaveNoCrossSectionMetricDuplicates() {
         XCTAssertTrue(
             TodayComponentRegistry.duplicateMetrics(
-                visibleSections: Set(TodaySection.defaultOrder),
+                // "Default" means default-VISIBLE. Library groups are in `defaultOrder` but ship hidden,
+                // and several deliberately re-present a value another section owns (Stress Today shows the
+                // Insights stress value; Overnight Vitals shows the SpO2 tile's). That overlap is only a
+                // duplicate once the owner has actually added the group, which the editor then labels.
+                visibleSections: Set(TodaySection.defaultOrder)
+                    .subtracting(TodaySection.libraryAdditions),
                 keyMetrics: KeyMetric.defaultSelection,
                 dashboardCards: DashboardCard.defaultSelection
             ).isEmpty
@@ -335,7 +443,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
 
     func testMovingSectionDownLandsAfterCrossedTarget() {
         XCTAssertEqual(
-            TodayLayoutPrefs.moving(.hero, to: .synthesis, in: TodaySection.defaultOrder),
+            classic(TodayLayoutPrefs.moving(.hero, to: .synthesis, in: TodaySection.defaultOrder)),
             [
                 .liveSession, .synthesis, .hero, .keyMetrics, .workouts, .heartRate, .recoveryVitals,
                 .yourCards, .journal,
@@ -345,7 +453,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
 
     func testMovingSectionUpLandsBeforeCrossedTarget() {
         XCTAssertEqual(
-            TodayLayoutPrefs.moving(.heartRate, to: .synthesis, in: TodaySection.defaultOrder),
+            classic(TodayLayoutPrefs.moving(.heartRate, to: .synthesis, in: TodaySection.defaultOrder)),
             [
                 .hero, .liveSession, .heartRate, .synthesis, .keyMetrics, .workouts, .recoveryVitals,
                 .yourCards, .journal,
@@ -357,5 +465,130 @@ final class TodayLayoutPrefsTests: XCTestCase {
         let order = TodaySection.defaultOrder
         XCTAssertEqual(TodayLayoutPrefs.moving(.hero, to: .hero, in: order), order)
         XCTAssertEqual(TodayLayoutPrefs.moving(.hero, to: .synthesis, in: [.workouts, .synthesis]), [.workouts, .synthesis])
+    }
+
+    func testMovingToAVisualSlotStaysThereAfterTheLayoutReflows() {
+        let order: [TodaySection] = [.hero, .synthesis, .keyMetrics, .workouts]
+        let moved = TodayLayoutPrefs.moving(.synthesis, toIndex: 2, in: order)
+        XCTAssertEqual(moved, [.hero, .keyMetrics, .synthesis, .workouts])
+        // The same physical slot now belongs to the dragged section. Re-evaluating under a stationary
+        // finger must be a no-op rather than swapping it back with the old occupant.
+        XCTAssertEqual(
+            TodayLayoutPrefs.moving(.synthesis, toIndex: 2, in: moved),
+            moved
+        )
+    }
+
+    func testMovingToAVisualSlotClampsAtTheCanvasEdges() {
+        let order: [TodaySection] = [.hero, .synthesis, .keyMetrics]
+        XCTAssertEqual(
+            TodayLayoutPrefs.moving(.hero, toIndex: 99, in: order),
+            [.synthesis, .keyMetrics, .hero]
+        )
+        XCTAssertEqual(
+            TodayLayoutPrefs.moving(.keyMetrics, toIndex: -10, in: order),
+            [.keyMetrics, .hero, .synthesis]
+        )
+    }
+
+    func testTodaySleepSnapshotCarriesLastNightsDailyRowIntoToday() throws {
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-30T12:00:00Z")
+        )
+        let prior = DailyMetric(
+            day: "2026-07-29",
+            totalSleepMin: 430,
+            efficiency: 91,
+            deepMin: 80,
+            remMin: 95,
+            lightMin: 255,
+            disturbances: 3,
+            restingHr: nil,
+            avgHrv: nil,
+            recovery: nil,
+            strain: nil,
+            exerciseCount: nil
+        )
+
+        let snapshot = try XCTUnwrap(
+            TodaySleepSnapshot.resolve(
+                selectedDayKey: "2026-07-30",
+                isToday: true,
+                days: [prior],
+                sessions: [],
+                now: now
+            )
+        )
+        XCTAssertEqual(snapshot.totalSleepMin, 430)
+        XCTAssertEqual(snapshot.efficiencyPct, 91)
+        XCTAssertEqual(snapshot.deepMin, 80)
+        XCTAssertEqual(snapshot.disturbances, 3)
+    }
+
+    func testTodaySleepSnapshotUsesCachedSessionStagesWhenDailyRowIsEmpty() throws {
+        let formatter = ISO8601DateFormatter()
+        let now = try XCTUnwrap(formatter.date(from: "2026-07-30T12:00:00Z"))
+        let start = Int(try XCTUnwrap(
+            formatter.date(from: "2026-07-30T00:00:00Z")
+        ).timeIntervalSince1970)
+        let stages = """
+        [
+          {"start":\(start),"end":\(start + 3600),"stage":"deep"},
+          {"start":\(start + 3600),"end":\(start + 7200),"stage":"rem"},
+          {"start":\(start + 7200),"end":\(start + 14400),"stage":"light"}
+        ]
+        """
+        let session = CachedSleepSession(
+            startTs: start,
+            endTs: start + 14400,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: stages
+        )
+
+        let snapshot = try XCTUnwrap(
+            TodaySleepSnapshot.resolve(
+                selectedDayKey: "2026-07-30",
+                isToday: true,
+                days: [],
+                sessions: [session],
+                now: now
+            )
+        )
+        XCTAssertEqual(snapshot.totalSleepMin, 240)
+        XCTAssertEqual(snapshot.efficiencyPct, 100)
+        XCTAssertEqual(snapshot.deepMin, 60)
+        XCTAssertEqual(snapshot.remMin, 60)
+        XCTAssertEqual(snapshot.lightMin, 120)
+    }
+
+    func testHistoricalSleepSnapshotDoesNotBorrowAnotherNight() throws {
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-30T12:00:00Z")
+        )
+        let otherNight = DailyMetric(
+            day: "2026-07-29",
+            totalSleepMin: 430,
+            efficiency: 91,
+            deepMin: 80,
+            remMin: 95,
+            lightMin: 255,
+            disturbances: 3,
+            restingHr: nil,
+            avgHrv: nil,
+            recovery: nil,
+            strain: nil,
+            exerciseCount: nil
+        )
+        XCTAssertNil(
+            TodaySleepSnapshot.resolve(
+                selectedDayKey: "2026-07-28",
+                isToday: false,
+                days: [otherNight],
+                sessions: [],
+                now: now
+            )
+        )
     }
 }

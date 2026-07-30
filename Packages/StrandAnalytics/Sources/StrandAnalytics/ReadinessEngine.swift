@@ -21,6 +21,25 @@ import WhoopStore
 /// Not medical advice. These are approximations from a consumer strap; they describe trends in
 /// *your own* data, nothing more.
 public enum ReadinessEngine {
+    /// The canonical acute:chronic load bands used by both readiness evidence and compact UI summaries.
+    public enum TrainingLoadBand: Sendable, Equatable {
+        case insufficient
+        case rampingDown
+        case balanced
+        case buildingFast
+        case high
+    }
+
+    public static func trainingLoadBand(acwr: Double?) -> TrainingLoadBand {
+        guard let acwr else { return .insufficient }
+        switch acwr {
+        case ..<0.8: return .rampingDown
+        case 0.8..<1.3: return .balanced
+        case 1.3..<1.5: return .buildingFast
+        default: return .high
+        }
+    }
+
 
     // MARK: Output types
 
@@ -240,23 +259,25 @@ public enum ReadinessEngine {
     private static func acwrSignal(_ ratio: Double, acute: Double, chronic: Double) -> Signal {
         let pct = String(format: "%.2f", ratio)
         let evidence = "7d \(String(format: "%.1f", acute)) / 28d \(String(format: "%.1f", chronic))"
-        switch ratio {
-        case ..<0.8:
+        switch trainingLoadBand(acwr: ratio) {
+        case .rampingDown:
             return Signal(key: "acwr", label: "Training load",
                 evidence: evidence,
                 detail: "ramping down (acute:chronic \(pct)) - room to build", flag: .watch)
-        case 0.8..<1.3:
+        case .balanced:
             return Signal(key: "acwr", label: "Training load",
                 evidence: evidence,
                 detail: "in the sweet spot (acute:chronic \(pct))", flag: .good)
-        case 1.3..<1.5:
+        case .buildingFast:
             return Signal(key: "acwr", label: "Training load",
                 evidence: evidence,
                 detail: "building fast (acute:chronic \(pct)) - watch fatigue", flag: .watch)
-        default:
+        case .high:
             return Signal(key: "acwr", label: "Training load",
                 evidence: evidence,
                 detail: "spiking (acute:chronic \(pct)) - higher injury risk", flag: .bad)
+        case .insufficient:
+            preconditionFailure("A concrete ACWR cannot resolve to insufficient")
         }
     }
 

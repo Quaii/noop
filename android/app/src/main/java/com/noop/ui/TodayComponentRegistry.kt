@@ -146,6 +146,12 @@ object TodayComponentRegistry {
             TodayComponentRole.DERIVED_INSIGHT,
             setOf(JOURNAL),
         ),
+        TodayComponentDeclaration(
+            "section:dataSources",
+            TodaySection.DATA_SOURCES,
+            TodayComponentRole.ACTION,
+            emptySet(),
+        ),
     )
 
     fun metricId(metric: KeyMetric): TodayMetricId = when (metric) {

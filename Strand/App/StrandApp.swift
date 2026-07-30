@@ -15,6 +15,7 @@ struct StrandApp: App {
         // Remove pre-registry Today duplicates before @AppStorage reads its first frame. The migration is
         // versioned, so a duplicate the user deliberately adds afterward remains their choice.
         TodayMetricOwnershipMigration.migrateIfNeeded()
+        TodayLibraryIntroductionMigration.migrateIfNeeded()
         // Foreground presentation: without a delegate, macOS suppresses a notification's banner while the
         // app is frontmost, so a reminder tested with NOOP open would show nothing. Mirrors iOS.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared

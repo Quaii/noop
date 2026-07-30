@@ -26,6 +26,8 @@ Strand.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
 !Strand.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 build/
 DerivedData/
+# Thread-local Xcode output uses a leading-dot variant; keep every such scratch tree out too.
+.derivedData*/
 .build/
 Packages/*/.build/
 Tools/*/.build/
@@ -94,6 +96,7 @@ __pycache__/
 
 # Local release artifacts (zips/ipas built for upload; never tracked)
 dist/
+artifacts/
 err.txt
 
 # Oura OAuth app credentials (BYO; never committed)

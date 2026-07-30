@@ -46,7 +46,11 @@ struct RootTabView: View {
 
     /// The Today tab root, honouring the liquid/classic preference.
     @ViewBuilder private var todayTabRoot: some View {
-        if liquidTodayEnabled { LiquidTodayView() } else { TodayView() }
+        if liquidTodayEnabled {
+            LiquidTodayView(isTabActive: selectedTab == 0)
+        } else {
+            TodayView()
+        }
     }
 
     init() {

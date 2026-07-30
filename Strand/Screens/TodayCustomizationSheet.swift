@@ -23,9 +23,10 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
     private let initialSectionDraft: EditableLayoutDraft<TodaySection>
     private let initialKeyMetricDraft: EditableLayoutDraft<KeyMetric>
     private let initialDashboardDraft: EditableLayoutDraft<DashboardCard>
+    private let initialGroupLayoutsRaw: String
     private let initialDetailed: Bool
     private let initialWindowDays: Int
-    private let groupPreview: (TodaySection) -> GroupPreview
+    private let groupPreview: (TodaySection, TodayGroupSize) -> GroupPreview
 
     @Binding private var sectionOrderRaw: String
     @Binding private var hiddenSectionsRaw: String
@@ -33,11 +34,13 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
     @Binding private var keyMetricsDetailed: Bool
     @Binding private var keyMetricsWindowDays: Int
     @Binding private var dashboardCardsRaw: String
+    @Binding private var groupLayoutsRaw: String
 
     @State private var path: [Route]
     @State private var sectionDraft: EditableLayoutDraft<TodaySection>
     @State private var keyMetricDraft: EditableLayoutDraft<KeyMetric>
     @State private var dashboardDraft: EditableLayoutDraft<DashboardCard>
+    @State private var groupLayoutDraftRaw: String
     @State private var detailed: Bool
     @State private var windowDays: Int
 
@@ -53,6 +56,7 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
         sectionDraft != initialSectionDraft
             || keyMetricDraft != initialKeyMetricDraft
             || dashboardDraft != initialDashboardDraft
+            || groupLayoutDraftRaw != initialGroupLayoutsRaw
             || detailed != initialDetailed
             || windowDays != initialWindowDays
     }
@@ -65,7 +69,8 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
         keyMetricsDetailed: Binding<Bool>,
         keyMetricsWindowDays: Binding<Int>,
         dashboardCardsRaw: Binding<String>,
-        @ViewBuilder groupPreview: @escaping (TodaySection) -> GroupPreview
+        groupLayoutsRaw: Binding<String>,
+        @ViewBuilder groupPreview: @escaping (TodaySection, TodayGroupSize) -> GroupPreview
     ) {
         _sectionOrderRaw = sectionOrderRaw
         _hiddenSectionsRaw = hiddenSectionsRaw
@@ -73,6 +78,7 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
         _keyMetricsDetailed = keyMetricsDetailed
         _keyMetricsWindowDays = keyMetricsWindowDays
         _dashboardCardsRaw = dashboardCardsRaw
+        _groupLayoutsRaw = groupLayoutsRaw
         self.groupPreview = groupPreview
 
         let fullSectionOrder = TodayLayoutPrefs.decodeOrder(sectionOrderRaw.wrappedValue)
@@ -93,12 +99,14 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
         initialSectionDraft = sections
         initialKeyMetricDraft = metrics
         initialDashboardDraft = cards
+        initialGroupLayoutsRaw = groupLayoutsRaw.wrappedValue
         initialDetailed = keyMetricsDetailed.wrappedValue
         initialWindowDays = keyMetricsWindowDays.wrappedValue
 
         _sectionDraft = State(initialValue: sections)
         _keyMetricDraft = State(initialValue: metrics)
         _dashboardDraft = State(initialValue: cards)
+        _groupLayoutDraftRaw = State(initialValue: groupLayoutsRaw.wrappedValue)
         _detailed = State(initialValue: keyMetricsDetailed.wrappedValue)
         _windowDays = State(initialValue: keyMetricsWindowDays.wrappedValue)
 
@@ -117,6 +125,7 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
             TodaySectionsCustomizationPage(
                 draft: $sectionDraft,
                 keyMetricDraft: $keyMetricDraft,
+                groupLayoutsRaw: $groupLayoutDraftRaw,
                 onConfigure: openConfiguration,
                 onReset: resetCurrentLayout,
                 groupPreview: groupPreview
@@ -176,9 +185,10 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
         switch currentDestination {
         case .today:
             sectionDraft = EditableLayoutDraft(
-                visible: TodaySection.defaultOrder,
+                visible: TodaySection.defaultVisibleOrder,
                 allItems: TodaySection.defaultOrder
             )
+            groupLayoutDraftRaw = ""
         case .keyMetrics:
             keyMetricDraft = EditableLayoutDraft(
                 visible: KeyMetric.defaultSelection,
@@ -205,6 +215,7 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
         keyMetricsDetailed = detailed
         keyMetricsWindowDays = windowDays
         dashboardCardsRaw = DashboardCardPrefs.encode(dashboardDraft.visible)
+        groupLayoutsRaw = groupLayoutDraftRaw
         dismiss()
     }
 
@@ -226,10 +237,10 @@ struct TodayCustomizationSheet<GroupPreview: View>: View {
 private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
     @Binding var draft: EditableLayoutDraft<TodaySection>
     @Binding var keyMetricDraft: EditableLayoutDraft<KeyMetric>
+    @Binding var groupLayoutsRaw: String
     let onConfigure: (TodaySection) -> Void
     let onReset: () -> Void
-    let groupPreview: (TodaySection) -> GroupPreview
-    @AppStorage(TodayGroupLayoutPrefs.key) private var groupLayoutsRaw = ""
+    let groupPreview: (TodaySection, TodayGroupSize) -> GroupPreview
     @State private var searchText = ""
     @State private var showRecoveryVitalsRemoval = false
 
@@ -239,7 +250,7 @@ private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
                 if filteredGroups.isEmpty {
                     VStack(spacing: NoopMetrics.space3) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 26, weight: .medium))
+                            .font(StrandFont.title2)
                         Text("No matching groups")
                             .font(StrandFont.headline)
                     }
@@ -251,17 +262,14 @@ private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
                         ForEach(filteredGroups) { descriptor in
                             TodayGroupGalleryCard(
                                 descriptor: descriptor,
+                                supportedSizes: supportedSizes(for: descriptor.section),
                                 isAdded: draft.visible.contains(descriptor.section),
-                                groupSize: TodayGroupLayoutPrefs.size(
-                                    for: descriptor.section,
-                                    raw: groupLayoutsRaw
-                                ),
-                                onToggle: { toggle(descriptor.section) },
+                                onToggle: { size in toggle(descriptor.section, size: size) },
                                 onConfigure: configurationLabel(for: descriptor.section) == nil
                                     ? nil
                                     : { onConfigure(descriptor.section) }
-                            ) {
-                                groupPreview(descriptor.section)
+                            ) { size in
+                                groupPreview(descriptor.section, size)
                             }
                         }
                     }
@@ -311,6 +319,12 @@ private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
         TodayGroupCatalog.all.filter { $0.matches(searchText) }
     }
 
+    private func supportedSizes(for section: TodaySection) -> [TodayGroupSize] {
+        section == .keyMetrics
+            ? KeyMetricGroupSizing.supportedSizes(itemCount: keyMetricDraft.visible.count)
+            : section.supportedGroupSizes
+    }
+
     private func configurationLabel(for section: TodaySection) -> String? {
         switch section {
         case .keyMetrics, .yourCards:
@@ -320,7 +334,7 @@ private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
         }
     }
 
-    private func toggle(_ section: TodaySection) {
+    private func toggle(_ section: TodaySection, size: TodayGroupSize) {
         if draft.visible.contains(section) {
             guard draft.visible.count > 1 else { return }
             if section == .recoveryVitals {
@@ -336,6 +350,11 @@ private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
         guard draft.hidden.contains(section) else { return }
         StrandHaptic.selection.play()
         withAnimation(StrandMotion.interactive) {
+            groupLayoutsRaw = TodayGroupLayoutPrefs.setting(
+                size,
+                for: section,
+                raw: groupLayoutsRaw
+            )
             draft.show(section)
         }
     }
@@ -361,26 +380,31 @@ private struct TodaySectionsCustomizationPage<GroupPreview: View>: View {
 
 private struct TodayGroupGalleryCard<Preview: View>: View {
     let descriptor: TodayGroupDescriptor
+    let supportedSizes: [TodayGroupSize]
     let isAdded: Bool
-    let groupSize: TodayGroupSize
-    let onToggle: () -> Void
+    let onToggle: (TodayGroupSize) -> Void
     let onConfigure: (() -> Void)?
-    let preview: Preview
+    let preview: (TodayGroupSize) -> Preview
+    @State private var previewSize: TodayGroupSize
 
     init(
         descriptor: TodayGroupDescriptor,
+        supportedSizes: [TodayGroupSize],
         isAdded: Bool,
-        groupSize: TodayGroupSize,
-        onToggle: @escaping () -> Void,
+        onToggle: @escaping (TodayGroupSize) -> Void,
         onConfigure: (() -> Void)?,
-        @ViewBuilder preview: () -> Preview
+        @ViewBuilder preview: @escaping (TodayGroupSize) -> Preview
     ) {
         self.descriptor = descriptor
+        self.supportedSizes = supportedSizes
         self.isAdded = isAdded
-        self.groupSize = groupSize
         self.onToggle = onToggle
         self.onConfigure = onConfigure
-        self.preview = preview()
+        self.preview = preview
+        let initialSize = supportedSizes.contains(.wide)
+            ? TodayGroupSize.wide
+            : (supportedSizes.first ?? descriptor.section.defaultGroupSize)
+        _previewSize = State(initialValue: initialSize)
     }
 
     var body: some View {
@@ -398,61 +422,56 @@ private struct TodayGroupGalleryCard<Preview: View>: View {
                 }
                 Spacer(minLength: 0)
 
-                if descriptor.section.supportedGroupSizes.count > 1 {
-                    Text(groupSize.title)
-                        .font(StrandFont.caption.weight(.semibold))
-                        .foregroundStyle(StrandPalette.accent)
-                        .padding(.horizontal, NoopMetrics.space2)
-                        .padding(.vertical, NoopMetrics.space1)
-                        .background(StrandPalette.accent.opacity(0.1), in: Capsule())
-                }
-                if let onConfigure {
-                    Button(action: onConfigure) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(StrandPalette.accent)
-                            .frame(width: 28, height: 28)
-                            .background(StrandPalette.surfaceInset, in: Circle())
-                    }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Edit \(descriptor.title)")
+                if supportedSizes.count > 1 {
+                    SegmentedPillControl(
+                        supportedSizes,
+                        selection: Binding(
+                            get: { resolvedPreviewSize },
+                            set: { previewSize = $0 }
+                        )
+                    ) { $0.title }
                 }
 
-                Button(action: onToggle) {
-                    Image(systemName: isAdded ? "checkmark" : "plus")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(
-                            isAdded ? StrandPalette.surfaceBase : StrandPalette.accent
-                        )
-                        .frame(width: 24, height: 24)
-                        .background(
-                            isAdded ? StrandPalette.statusPositive : StrandPalette.surfaceInset,
-                            in: Circle()
-                        )
-                        .overlay {
-                            if !isAdded {
-                                Circle().strokeBorder(StrandPalette.accent.opacity(0.6), lineWidth: 1)
-                            }
-                        }
+                if let onConfigure {
+                    NoopIconButton(
+                        "Edit \(descriptor.title)",
+                        systemImage: "slider.horizontal.3",
+                        action: onConfigure
+                    )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    isAdded ? "Remove \(descriptor.title)" : "Add \(descriptor.title)"
-                )
+
+                NoopIconButton(
+                    isAdded ? "Remove \(descriptor.title)" : "Add \(descriptor.title)",
+                    systemImage: isAdded ? "checkmark" : "plus",
+                    kind: isAdded ? .positive : .secondary
+                ) {
+                    onToggle(resolvedPreviewSize)
+                }
             }
 
-            // This is the exact section builder used by Today: live values, current card styling, current
-            // footprint, and real intrinsic aspect ratio. Interaction is disabled only inside the gallery.
-            TodayGroupGalleryPreviewLayout(columnSpan: groupSize.columnSpan) {
-                preview
+            // The production section builder receives the selected gallery footprint explicitly. The
+            // user's saved Today size is intentionally ignored here, exactly like the iOS widget gallery:
+            // switching 1×1 / 2×1 / 2×2 previews each real component before adding it.
+            TodayGroupGalleryPreviewLayout(columnSpan: resolvedPreviewSize.columnSpan) {
+                preview(resolvedPreviewSize)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
+        }
+        .onChangeCompat(of: supportedSizes) { sizes in
+            guard !sizes.contains(previewSize), let fallback = sizes.first else { return }
+            previewSize = fallback
         }
         .padding(.bottom, NoopMetrics.space4)
         .overlay(alignment: .bottom) {
             Divider().overlay(StrandPalette.hairline)
         }
+    }
+
+    private var resolvedPreviewSize: TodayGroupSize {
+        supportedSizes.contains(previewSize)
+            ? previewSize
+            : (supportedSizes.first ?? descriptor.section.defaultGroupSize)
     }
 }
 
@@ -627,10 +646,14 @@ private struct DashboardCardsCustomizationPage: View {
         keyMetricsRaw: .constant(""),
         keyMetricsDetailed: .constant(false),
         keyMetricsWindowDays: .constant(14),
-        dashboardCardsRaw: .constant("")
-    ) { section in
-        Text(section.title)
-            .frame(maxWidth: .infinity, minHeight: 120)
+        dashboardCardsRaw: .constant(""),
+        groupLayoutsRaw: .constant("")
+    ) { section, size in
+        Text("\(section.title) · \(size.title)")
+            .frame(
+                maxWidth: .infinity,
+                minHeight: NoopMetrics.TodayWidget.galleryPreviewMinimumHeight
+            )
             .background(StrandPalette.surfaceRaised)
     }
     .preferredColorScheme(.dark)

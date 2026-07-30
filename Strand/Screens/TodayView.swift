@@ -1433,8 +1433,9 @@ struct TodayView: View {
                 keyMetricsRaw: $keyMetricsRaw,
                 keyMetricsDetailed: $keyMetricsDetailed,
                 keyMetricsWindowDays: $keyMetricsWindowDays,
-                dashboardCardsRaw: $dashboardCardsRaw
-            ) { _ in
+                dashboardCardsRaw: $dashboardCardsRaw,
+                groupLayoutsRaw: .constant("")
+            ) { _, _ in
                 EmptyView()
             }
         }
@@ -1709,6 +1710,20 @@ struct TodayView: View {
             yourCardsSection
         case .journal:
             if selectedDayOffset == 0 { JournalReminderCard() }
+        case .dataSources:
+            EmptyView()
+        // The widget library is a liquid-Today feature: its groups are sized and resized by the widget
+        // canvas, which the classic screen does not have. They stay in the shared order registry so a
+        // layout still round-trips between the two screens and between platforms — the classic screen
+        // simply does not draw them. Adding one here means giving it a classic-layout design too.
+        case .sleepSummary, .sleepStages, .restorativeSleep, .sleepEfficiency,
+             .sleepDisturbances, .deepSleep, .remSleep, .lightSleep, .sleepDebt,
+             .overnightVitals, .skinTemperature, .recoveryForecast, .bodyClock,
+             .cycleAwareness, .activity, .stepsToday, .activeEnergy, .sessionsToday,
+             .trainingLoad, .heartRateZones, .stressToday, .stressLevel,
+             .fitnessAgeSummary, .vitalityScore,
+             .hydration, .caffeine, .weeklyDigest, .streaks:
+            EmptyView()
         }
     }
 

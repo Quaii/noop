@@ -143,15 +143,56 @@ enum KeyMetricGridLayout {
         }
     }
 
+    /// Columns for a group footprint, chosen so the tiles FILL their rows.
+    ///
+    /// Taking the widest count that fits left ragged grids — six metrics in a 2×1 became a row of four and
+    /// a row of two, with two empty slots the eye reads as missing content. Instead, pick the count that
+    /// leaves the fewest empty slots, breaking ties toward the denser grid. Six then lands on 3+3, four on
+    /// a single row of four, five on 3+2.
     static func columnCount(itemCount: Int, groupSize: TodayGroupSize) -> Int {
+        let items = max(1, itemCount)
+        let maxColumns: Int
         switch groupSize {
-        case .small:
-            return min(2, max(1, itemCount))
-        case .wide:
-            return min(4, max(1, itemCount))
-        case .large:
-            return columnCount(itemCount: itemCount)
+        // A 1×1 group may contain up to four selected metrics. Keep that bounded footprint a real grid:
+        // four becomes 2×2 rather than an unbounded 1×4 strip that is no longer remotely square.
+        case .small:  maxColumns = min(2, items)
+        case .wide:   maxColumns = 4
+        case .large:  maxColumns = columnCount(itemCount: items)
         }
+        return balancedColumnCount(itemCount: items, maxColumns: maxColumns)
+    }
+
+    /// Spread `itemCount` tiles over the FEWEST rows `maxColumns` allows, then divide those rows evenly.
+    ///
+    /// Minimising empty slots directly does not work: one column always wastes nothing, so it wins every
+    /// time and stacks the tiles in a single file. Fixing the row count first and balancing within it is
+    /// what produces the layouts that actually look right — 6→3+3, 5→3+2, 7→4+3, 4→one row of four.
+    static func balancedColumnCount(itemCount: Int, maxColumns: Int) -> Int {
+        let items = max(1, itemCount)
+        let ceiling = min(max(1, maxColumns), items)
+        let rows = (items + ceiling - 1) / ceiling
+        return (items + rows - 1) / rows
+    }
+}
+
+/// Key Metrics can only use the half-width 1×1 family while its complete chosen set remains readable.
+/// The section never drops user-selected tiles to make a footprint fit; instead, selecting a fifth tile
+/// removes 1×1 from the resize ladder and promotes an existing compact layout to 2×1.
+enum KeyMetricGroupSizing {
+    static let maximumSmallMetricCount = 4
+
+    static func supportedSizes(itemCount: Int) -> [TodayGroupSize] {
+        itemCount <= maximumSmallMetricCount
+            ? [.small, .wide, .large]
+            : [.wide, .large]
+    }
+
+    static func effectiveSize(
+        configured: TodayGroupSize,
+        itemCount: Int
+    ) -> TodayGroupSize {
+        let sizes = supportedSizes(itemCount: itemCount)
+        return sizes.contains(configured) ? configured : .wide
     }
 }
 
@@ -190,5 +231,21 @@ enum KeyMetricPrefs {
             }
         }
         return result.isEmpty ? KeyMetric.defaultSelection : result
+    }
+
+    /// Reordering is allowed to change positions only, never membership. A SwiftUI grid can briefly
+    /// publish a partial child snapshot while its cells are moving; persisting that transient array would
+    /// turn a visual animation glitch into a genuinely hidden metric. Reject any proposal that is not an
+    /// exact permutation of the currently enabled set.
+    static func validatedReorder(
+        _ proposed: [KeyMetric],
+        preserving enabled: [KeyMetric]
+    ) -> [KeyMetric] {
+        guard proposed.count == enabled.count,
+              Set(proposed).count == proposed.count,
+              Set(proposed) == Set(enabled) else {
+            return enabled
+        }
+        return proposed
     }
 }

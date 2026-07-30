@@ -167,49 +167,61 @@ struct TodayRemoveBadge: View {
     }
 }
 
-/// A constrained group-size handle. Horizontal movement snaps between the layouts the group explicitly
-/// supports; it never stores raw geometry, so rotation, iPad width, and Dynamic Type remain safe.
+/// A constrained group-size handle. It never stores raw geometry, so rotation, iPad width, and Dynamic
+/// Type remain safe.
+///
+/// Every resizable group gets the SAME corner arc, tucked into the card's rounded corner. An edge grip on
+/// the groups that only change width was tried and looked wrong: two different resize affordances on one
+/// screen reads as inconsistency long before it reads as a hint about degrees of freedom. The axis still
+/// governs what the drag does and what VoiceOver announces — just not what is drawn.
 struct TodayGroupResizeHandle: View {
     @Binding var size: TodayGroupSize
     let supportedSizes: [TodayGroupSize]
+    let axis: TodayGroupResizeAxis
     let label: String
     let coordinateSpace: String
-    let visualOffset: CGSize
     let onDragChanged: (CGSize) -> Void
-    let onDragEnded: (CGSize) -> Void
+    /// Receives the final translation and the gesture's predicted end translation, in that order. The
+    /// prediction is what lets a flick commit a footprint the finger stopped just short of.
+    let onDragEnded: (CGSize, CGSize) -> Void
 
     var body: some View {
         resizeHandleChrome
-        .frame(width: 32, height: 32)
-        .frame(width: 44, height: 44)
-        .offset(visualOffset)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(
-                minimumDistance: 3,
-                coordinateSpace: .named(coordinateSpace)
+            .frame(
+                width: NoopMetrics.TodayReorder.resizeHandleVisualSize,
+                height: NoopMetrics.TodayReorder.resizeHandleVisualSize
             )
-                .onChanged { value in
-                    onDragChanged(value.translation)
+            .frame(
+                width: NoopMetrics.TodayReorder.resizeHandleHitTarget,
+                height: NoopMetrics.TodayReorder.resizeHandleHitTarget
+            )
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(
+                    minimumDistance: NoopMetrics.TodayReorder.resizeMinimumDragDistance,
+                    coordinateSpace: .named(coordinateSpace)
+                )
+                    .onChanged { value in
+                        onDragChanged(value.translation)
+                    }
+                    .onEnded { value in
+                        onDragEnded(value.translation, value.predictedEndTranslation)
+                    }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Resize \(label)")
+            .accessibilityValue(size.title)
+            .accessibilityHint(accessibilityHint)
+            .accessibilityAdjustableAction { direction in
+                guard let currentIndex = supportedSizes.firstIndex(of: size) else { return }
+                switch direction {
+                case .decrement:
+                    setSize(at: currentIndex - 1)
+                case .increment:
+                    setSize(at: currentIndex + 1)
+                @unknown default: break
                 }
-                .onEnded { value in
-                    onDragEnded(value.translation)
-                }
-        )
-        .accessibilityElement()
-        .accessibilityLabel("Resize \(label)")
-        .accessibilityValue(size.title)
-        .accessibilityHint("Drag inward to make the group smaller or outward to make it larger.")
-        .accessibilityAdjustableAction { direction in
-            guard let currentIndex = supportedSizes.firstIndex(of: size) else { return }
-            switch direction {
-            case .decrement:
-                setSize(at: currentIndex - 1)
-            case .increment:
-                setSize(at: currentIndex + 1)
-            @unknown default: break
             }
-        }
     }
 
     @ViewBuilder
@@ -218,7 +230,7 @@ struct TodayGroupResizeHandle: View {
             TodayBottomTrailingGlassShape()
                 .fill(.white.opacity(0.12))
                 .glassEffect(
-                    .regular.tint(.white.opacity(0.08)).interactive(),
+                    .regular.tint(.white.opacity(0.08)),
                     in: TodayBottomTrailingGlassShape()
                 )
                 .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
@@ -230,6 +242,23 @@ struct TodayGroupResizeHandle: View {
                         .stroke(.white.opacity(0.32), lineWidth: 0.8)
                 }
                 .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+        }
+    }
+
+    private var accessibilityHint: String {
+        switch axis {
+        case .horizontal:
+            return String(
+                localized: "Drag left to make the group narrower or right to make it wider."
+            )
+        case .vertical:
+            return String(
+                localized: "Drag up to make the group shorter or down to make it taller."
+            )
+        case .both:
+            return String(
+                localized: "Drag inward to make the group smaller or outward to make it larger."
+            )
         }
     }
 
@@ -269,6 +298,151 @@ private struct TodayBottomTrailingGlassShape: Shape {
         )
     }
 }
+
+
+/// The value delivered by the UIKit-backed reorder recognizer. Both points are expressed in the
+/// enclosing scroll view's viewport coordinates, matching the named coordinate space used by the
+/// section/item frame preferences.
+struct TodayReorderGestureValue {
+    let location: CGPoint
+    let translation: CGSize
+}
+
+/// A long-press recognizer that deliberately coexists with the enclosing UIScrollView's pan recognizer.
+///
+/// SwiftUI's `LongPressGesture.sequenced(before: DragGesture)` installs the drag recognizer immediately,
+/// while the long press is still undecided. Across a complete Today section that recognizer prevents the
+/// scroll view from winning an ordinary flick. `UILongPressGestureRecognizer` already remains continuous
+/// after it begins, so a second drag recognizer is unnecessary: movement before the hold fails the long
+/// press and scrolls natively; movement after `.began` drives the lifted card.
+struct TodayReorderLongPressDragSurface: UIViewRepresentable {
+    let isEnabled: Bool
+    let minimumDuration: TimeInterval
+    let movementTolerance: CGFloat
+    let onBegan: (TodayReorderGestureValue) -> Void
+    let onChanged: (TodayReorderGestureValue) -> Void
+    let onEnded: (TodayReorderGestureValue, Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        let recognizer = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleLongPress(_:))
+        )
+        recognizer.minimumPressDuration = minimumDuration
+        recognizer.allowableMovement = movementTolerance
+        recognizer.cancelsTouchesInView = true
+        recognizer.delaysTouchesBegan = false
+        recognizer.delegate = context.coordinator
+        view.addGestureRecognizer(recognizer)
+        context.coordinator.recognizer = recognizer
+        view.isUserInteractionEnabled = isEnabled
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.recognizer?.minimumPressDuration = minimumDuration
+        context.coordinator.recognizer?.allowableMovement = movementTolerance
+        context.coordinator.recognizer?.isEnabled = isEnabled
+        uiView.isUserInteractionEnabled = isEnabled
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: TodayReorderLongPressDragSurface
+        weak var recognizer: UILongPressGestureRecognizer?
+        private var startLocation = CGPoint.zero
+        private var activated = false
+
+        init(parent: TodayReorderLongPressDragSurface) {
+            self.parent = parent
+        }
+
+        @objc func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            let location = recognizer.location(in: coordinateView(for: recognizer))
+            let value = TodayReorderGestureValue(
+                location: location,
+                translation: CGSize(
+                    width: location.x - startLocation.x,
+                    height: location.y - startLocation.y
+                )
+            )
+
+            switch recognizer.state {
+            case .began:
+                startLocation = location
+                activated = true
+                parent.onBegan(
+                    TodayReorderGestureValue(location: location, translation: .zero)
+                )
+            case .changed:
+                guard activated else { return }
+                parent.onChanged(value)
+            case .ended:
+                guard activated else { return }
+                activated = false
+                parent.onEnded(value, false)
+            case .cancelled:
+                guard activated else { return }
+                activated = false
+                parent.onEnded(value, true)
+            case .failed, .possible:
+                break
+            @unknown default:
+                guard activated else { return }
+                activated = false
+                parent.onEnded(value, true)
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let scrollView = enclosingScrollView(from: gestureRecognizer.view) else {
+                return false
+            }
+            return otherGestureRecognizer === scrollView.panGestureRecognizer
+        }
+
+        private func coordinateView(for recognizer: UIGestureRecognizer) -> UIView? {
+            enclosingScrollView(from: recognizer.view)
+                ?? recognizer.view?.window
+                ?? recognizer.view
+        }
+
+        private func enclosingScrollView(from view: UIView?) -> UIScrollView? {
+            var ancestor = view?.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    return scrollView
+                }
+                ancestor = current.superview
+            }
+            return nil
+        }
+    }
+}
+
+/// A child can provide the real rounded-card edge that owns its group's resize grabber. Key Metrics
+/// uses the final visible tile rather than the footer below its grid, so the arc sits on a card corner
+/// instead of the edge of an invisible section-sized rectangle.
+struct TodayResizeHandleAnchorPreferenceKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>?
+
+    static func reduce(
+        value: inout Anchor<CGRect>?,
+        nextValue: () -> Anchor<CGRect>?
+    ) {
+        value = nextValue() ?? value
+    }
+}
+
 
 /// Weakly locates SwiftUI's enclosing vertical UIScrollView so a card held near an edge can continue
 /// moving through the Today feed. UIKit remains in the app layer; no UIKit enters StrandDesign.

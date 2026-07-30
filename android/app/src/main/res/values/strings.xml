@@ -68,6 +68,12 @@
     <string name="today_customize_move_down">Move %1$s down</string>
     <string name="today_customize_hide">Hide %1$s</string>
     <string name="today_customize_show">Show %1$s</string>
+    <string name="today_hide_recovery_vitals_title">Hide Recovery Vitals?</string>
+    <string name="today_hide_recovery_vitals_message">Recovery Vitals groups HRV, Resting HR, and Respiratory Rate. Choose whether those measurements should remain on Today as individual tiles.</string>
+    <string name="today_add_missing_vitals">Add missing vitals</string>
+    <string name="today_cancel">Cancel</string>
+    <string name="today_hide_only">Hide only</string>
+    <string name="today_no_heart_rate_yet">No heart rate yet. Your curve fills in after the strap syncs.</string>
 
     <!-- First-run Terms gate (clickwrap). Moved out of TermsGate.kt string literals so the gate is
          localizable (PR #984); English wording kept byte-identical to the macOS/iOS `Terms.points` /

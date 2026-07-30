@@ -24,10 +24,11 @@ class TodayLayoutPrefsTest {
             TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.YOUR_CARDS,
             TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
             TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
+            TodaySection.DATA_SOURCES,
         )
         val encoded = TodayLayoutPrefs.encode(reordered)
         assertEquals(
-            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal",
+            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal,dataSources",
             encoded,
         )
         assertEquals(reordered, TodayLayoutPrefs.decodeOrder(encoded))
@@ -45,7 +46,7 @@ class TodayLayoutPrefsTest {
                 TodaySection.SYNTHESIS, TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
                 TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS, TodaySection.YOUR_CARDS,
                 // journal(8) follows everything saved → appended:
-                TodaySection.JOURNAL,
+                TodaySection.JOURNAL, TodaySection.DATA_SOURCES,
             ),
             TodayLayoutPrefs.decodeOrder(firstCut),
         )
@@ -66,7 +67,7 @@ class TodayLayoutPrefsTest {
                 TodaySection.HEART_RATE, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
                 TodaySection.RECOVERY_VITALS,
                 // yourCards(7) then journal(8) follow everything saved → appended in default order:
-                TodaySection.YOUR_CARDS, TodaySection.JOURNAL,
+                TodaySection.YOUR_CARDS, TodaySection.JOURNAL, TodaySection.DATA_SOURCES,
             ),
             decoded,
         )
@@ -85,7 +86,7 @@ class TodayLayoutPrefsTest {
                 TodaySection.KEY_METRICS, TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS,
                 TodaySection.YOUR_CARDS, TodaySection.HEART_RATE,
                 // journal(8) follows everything → appended last:
-                TodaySection.JOURNAL,
+                TodaySection.JOURNAL, TodaySection.DATA_SOURCES,
             ),
             decoded,
         )
@@ -110,7 +111,7 @@ class TodayLayoutPrefsTest {
             listOf(
                 TodaySection.HEART_RATE, TodaySection.YOUR_CARDS, TodaySection.LIVE_SESSION,
                 TodaySection.SYNTHESIS, TodaySection.KEY_METRICS, TodaySection.RECOVERY_VITALS,
-                TodaySection.JOURNAL,
+                TodaySection.JOURNAL, TodaySection.DATA_SOURCES,
             ),
             TodayLayoutPrefs.visibleOrder(order, "hero,workouts"),
         )
@@ -142,7 +143,7 @@ class TodayLayoutPrefsTest {
         assertEquals(
             listOf(
                 "hero", "liveSession", "synthesis", "keyMetrics",
-                "workouts", "heartRate", "recoveryVitals", "yourCards", "journal",
+                "workouts", "heartRate", "recoveryVitals", "yourCards", "journal", "dataSources",
             ),
             raws,
         )

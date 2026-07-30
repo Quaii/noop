@@ -69,7 +69,9 @@ public enum StrandMotion {
     /// Deliberate hold that enters Today edit mode without stealing an ordinary scroll.
     public static let editHoldDuration: Double = 0.5
     /// Shorter hold used once already editing: a flick scrolls, while a stationary hold picks an item up.
-    public static let reorderHoldDuration: Double = 0.24
+    /// Deliberately longer than the start of an ordinary scroll. On a real touch screen, 0.24 seconds
+    /// picked cards up during slow flicks; 0.38 still feels immediate after the edit-mode jiggle begins.
+    public static let reorderHoldDuration: Double = 0.38
     /// Time for a released card to glide from the finger back into its committed slot.
     public static let reorderSettleDuration: Double = 0.22
     /// Quick Launch's home-screen cadence, varied deterministically so neighbouring items drift apart.

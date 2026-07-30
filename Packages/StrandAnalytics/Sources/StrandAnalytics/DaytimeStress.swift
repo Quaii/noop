@@ -1,6 +1,22 @@
 import Foundation
 import WhoopProtocol
 
+/// Canonical 0–3 stress bands. The analytics screen, Today widgets and summaries all use these thresholds
+/// rather than defining subtly different labels for the same stored stress score.
+public enum StressBand: Sendable, Equatable {
+    case low
+    case medium
+    case high
+
+    public init(score: Double) {
+        switch score {
+        case ..<1: self = .low
+        case ..<2: self = .medium
+        default: self = .high
+        }
+    }
+}
+
 // DaytimeStress.swift — an intraday (hour-by-hour) read of the SAME autonomic stress
 // proxy the daily Stress monitor shows, computed from the day's banked HR + R-R.
 //

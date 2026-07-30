@@ -64,16 +64,21 @@ enum WeeklyDigestSource {
 /// (an empty view) when there's no data this week, so it's safe to always place.
 struct WeeklyDigestCard: View {
     @EnvironmentObject var repo: Repository
+    var anchorDay: String? = nil
+    var compact = true
 
     var body: some View {
-        let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: Repository.localDayKey(Date()))
+        let digest = WeeklyDigestSource.digest(
+            from: repo.days,
+            anchorDay: anchorDay ?? Repository.localDayKey(Date())
+        )
         if digest.isEmpty {
             EmptyView()
         } else {
             // Content owns its own frosted cards (the domain score row + the signals
             // card), so it's no longer wrapped in an outer NoopCard — that would double
             // the frost. The compact flag trims it to the three headline scores.
-            WeeklyDigestContent(digest: digest, compact: true)
+            WeeklyDigestContent(digest: digest, compact: compact)
         }
     }
 }

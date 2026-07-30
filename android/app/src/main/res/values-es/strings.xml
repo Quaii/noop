@@ -1551,6 +1551,12 @@
     <string name="today_customize_move_down">Mover %1$s hacia abajo</string>
     <string name="today_customize_hide">Ocultar %1$s</string>
     <string name="today_customize_show">Mostrar %1$s</string>
+    <string name="today_hide_recovery_vitals_title">¿Ocultar constantes de recuperación?</string>
+    <string name="today_hide_recovery_vitals_message">Constantes de recuperación agrupa la VFC, la frecuencia cardíaca en reposo y la frecuencia respiratoria. Elige si estas mediciones deben permanecer en Hoy como tarjetas individuales.</string>
+    <string name="today_add_missing_vitals">Añadir constantes que faltan</string>
+    <string name="today_cancel">Cancelar</string>
+    <string name="today_hide_only">Solo ocultar</string>
+    <string name="today_no_heart_rate_yet">Aún no hay datos de frecuencia cardíaca. La curva se completará cuando se sincronice la pulsera.</string>
     <string name="terms_title">Antes de usar NOOP</string>
     <string name="terms_subtitle">Por favor lea los puntos de abajo, luego confirme cada declaración.</string>
     <string name="terms_point_independent_head">Independiente: no afiliado a WHOOP</string>

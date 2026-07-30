@@ -40,6 +40,7 @@ struct StrandiOSApp: App {
         // Clean pre-registry Today duplicates before the iOS shell's @AppStorage values are created.
         // Versioning keeps any overlap the user deliberately adds afterward.
         TodayMetricOwnershipMigration.migrateIfNeeded()
+        TodayLibraryIntroductionMigration.migrateIfNeeded()
         // Debug-only canary: trips if the App Group entitlement is missing on this target before any
         // silent no-op (PendingIntents, WidgetSnapshot.publish, Live Activity) can mask the issue as
         // "the widget doesn't show anything yet." No-op in Release.

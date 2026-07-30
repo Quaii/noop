@@ -5,6 +5,17 @@ import Foundation
 /// blocks into the sleep-derived daily fields. Pure + deterministic, so the daily-aggregate recompute
 /// that honors a user's wake-time edit can run off the stored (reshaped) stages — no raw streams needed.
 public enum SleepStageTotals {
+    /// Percentage of scored sleep spent in the restorative stages (deep + REM). Importers and Today
+    /// presentation use this single definition so the same night cannot report two different percentages.
+    public static func restorativePercentage(
+        deepMin: Double?,
+        remMin: Double?,
+        totalSleepMin: Double?
+    ) -> Double? {
+        guard let totalSleepMin, totalSleepMin > 0 else { return nil }
+        return ((deepMin ?? 0) + (remMin ?? 0)) / totalSleepMin * 100
+    }
+
 
     public struct Minutes: Equatable {
         public var awake: Double, light: Double, deep: Double, rem: Double

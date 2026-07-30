@@ -32,6 +32,27 @@ struct TodayMetricID: RawRepresentable, Hashable {
     static let synthesis = Self(rawValue: "synthesis")
     static let workouts = Self(rawValue: "workouts")
     static let journal = Self(rawValue: "journal")
+    // Widget-library values. `sleepDuration`, `stress`, and `hydration` already existed and are reused
+    // rather than duplicated, so the editor can still tell the owner when two groups show the same thing.
+    static let sleepEfficiency = Self(rawValue: "sleepEfficiency")
+    static let sleepStages = Self(rawValue: "sleepStages")
+    static let restorativeSleep = Self(rawValue: "restorativeSleep")
+    static let sleepDisturbances = Self(rawValue: "sleepDisturbances")
+    static let deepSleep = Self(rawValue: "deepSleep")
+    static let remSleep = Self(rawValue: "remSleep")
+    static let lightSleep = Self(rawValue: "lightSleep")
+    static let sleepDebt = Self(rawValue: "sleepDebt")
+    static let recoveryForecast = Self(rawValue: "recoveryForecast")
+    static let trainingLoad = Self(rawValue: "trainingLoad")
+    static let activeEnergy = Self(rawValue: "activeEnergy")
+    static let workoutCount = Self(rawValue: "workoutCount")
+    static let heartRateZones = Self(rawValue: "heartRateZones")
+    static let caffeine = Self(rawValue: "caffeine")
+    static let overnightVitals = Self(rawValue: "overnightVitals")
+    static let circadianPhase = Self(rawValue: "circadianPhase")
+    static let cyclePhase = Self(rawValue: "cyclePhase")
+    static let weeklyDigest = Self(rawValue: "weeklyDigest")
+    static let streaks = Self(rawValue: "streaks")
 }
 
 enum TodayComponentRole: String, Hashable {
@@ -148,6 +169,175 @@ enum TodayComponentRegistry {
             section: .journal,
             role: .derivedInsight,
             metricIDs: [.journal]
+        ),
+        .init(id: "section:dataSources", section: .dataSources, role: .action, metricIDs: []),
+        .init(
+            id: "section:sleepSummary",
+            section: .sleepSummary,
+            role: .compoundSummary,
+            metricIDs: [.sleepDuration, .sleepEfficiency]
+        ),
+        .init(
+            id: "section:sleepStages",
+            section: .sleepStages,
+            role: .compoundSummary,
+            metricIDs: [.sleepStages, .sleepDuration]
+        ),
+        .init(
+            id: "section:restorativeSleep",
+            section: .restorativeSleep,
+            role: .derivedInsight,
+            metricIDs: [.restorativeSleep]
+        ),
+        .init(
+            id: "section:sleepEfficiency",
+            section: .sleepEfficiency,
+            role: .rawMetric,
+            metricIDs: [.sleepEfficiency]
+        ),
+        .init(
+            id: "section:sleepDisturbances",
+            section: .sleepDisturbances,
+            role: .rawMetric,
+            metricIDs: [.sleepDisturbances]
+        ),
+        .init(
+            id: "section:deepSleep",
+            section: .deepSleep,
+            role: .rawMetric,
+            metricIDs: [.deepSleep]
+        ),
+        .init(
+            id: "section:remSleep",
+            section: .remSleep,
+            role: .rawMetric,
+            metricIDs: [.remSleep]
+        ),
+        .init(
+            id: "section:lightSleep",
+            section: .lightSleep,
+            role: .rawMetric,
+            metricIDs: [.lightSleep]
+        ),
+        .init(
+            id: "section:sleepDebt",
+            section: .sleepDebt,
+            role: .derivedInsight,
+            metricIDs: [.sleepDebt]
+        ),
+        .init(
+            id: "section:recoveryForecast",
+            section: .recoveryForecast,
+            role: .derivedInsight,
+            metricIDs: [.recoveryForecast]
+        ),
+        .init(
+            id: "section:trainingLoad",
+            section: .trainingLoad,
+            role: .derivedInsight,
+            metricIDs: [.trainingLoad]
+        ),
+        .init(
+            id: "section:activity",
+            section: .activity,
+            role: .derivedInsight,
+            metricIDs: [.steps, .calories, .activeEnergy]
+        ),
+        .init(
+            id: "section:stepsToday",
+            section: .stepsToday,
+            role: .rawMetric,
+            metricIDs: [.steps]
+        ),
+        .init(
+            id: "section:activeEnergy",
+            section: .activeEnergy,
+            role: .rawMetric,
+            metricIDs: [.activeEnergy]
+        ),
+        .init(
+            id: "section:sessionsToday",
+            section: .sessionsToday,
+            role: .activity,
+            metricIDs: [.workoutCount]
+        ),
+        .init(
+            id: "section:heartRateZones",
+            section: .heartRateZones,
+            role: .compoundSummary,
+            metricIDs: [.heartRateZones]
+        ),
+        .init(
+            id: "section:stressToday",
+            section: .stressToday,
+            role: .compoundSummary,
+            metricIDs: [.stress]
+        ),
+        .init(
+            id: "section:stressLevel",
+            section: .stressLevel,
+            role: .rawMetric,
+            metricIDs: [.stress]
+        ),
+        .init(
+            id: "section:fitnessAgeSummary",
+            section: .fitnessAgeSummary,
+            role: .derivedInsight,
+            metricIDs: [.fitnessAge]
+        ),
+        .init(
+            id: "section:vitalityScore",
+            section: .vitalityScore,
+            role: .derivedInsight,
+            metricIDs: [.vitality]
+        ),
+        .init(
+            id: "section:hydration",
+            section: .hydration,
+            role: .rawMetric,
+            metricIDs: [.hydration]
+        ),
+        .init(
+            id: "section:caffeine",
+            section: .caffeine,
+            role: .rawMetric,
+            metricIDs: [.caffeine]
+        ),
+        .init(
+            id: "section:overnightVitals",
+            section: .overnightVitals,
+            role: .derivedInsight,
+            metricIDs: [.bloodOxygen, .skinTemperature]
+        ),
+        .init(
+            id: "section:skinTemperature",
+            section: .skinTemperature,
+            role: .rawMetric,
+            metricIDs: [.skinTemperature]
+        ),
+        .init(
+            id: "section:bodyClock",
+            section: .bodyClock,
+            role: .derivedInsight,
+            metricIDs: [.circadianPhase]
+        ),
+        .init(
+            id: "section:cycleAwareness",
+            section: .cycleAwareness,
+            role: .derivedInsight,
+            metricIDs: [.cyclePhase]
+        ),
+        .init(
+            id: "section:weeklyDigest",
+            section: .weeklyDigest,
+            role: .derivedInsight,
+            metricIDs: [.weeklyDigest]
+        ),
+        .init(
+            id: "section:streaks",
+            section: .streaks,
+            role: .derivedInsight,
+            metricIDs: [.streaks]
         ),
     ]
 
@@ -393,6 +583,182 @@ enum TodayGroupCatalog {
             summary: String(localized: "Daily check-ins and habits."),
             keywords: ["mood", "habits", "reflection"]
         ),
+        .init(
+            section: .dataSources,
+            title: String(localized: "Data Sources"),
+            summary: String(localized: "Synced from"),
+            keywords: ["sources", "sync", "provenance", "devices"]
+        ),
+        // The widget library. Every entry surfaces something NOOP already measures or something the owner
+        // already logs — none of them introduce a new number, they give an existing one a home on Today.
+        .init(
+            section: .sleepSummary,
+            title: String(localized: "Sleep Summary"),
+            summary: String(localized: "Last night's duration, efficiency, and timing."),
+            keywords: ["sleep", "night", "duration", "efficiency", "bed"]
+        ),
+        .init(
+            section: .sleepStages,
+            title: String(localized: "Sleep Stages"),
+            summary: String(localized: "The night's hypnogram with deep, REM, and light totals."),
+            keywords: ["sleep", "stages", "rem", "deep", "hypnogram"]
+        ),
+        .init(
+            section: .restorativeSleep,
+            title: String(localized: "Restorative Sleep"),
+            summary: String(localized: "Deep and REM sleep as a share of the night."),
+            keywords: ["sleep", "restorative", "rem", "deep", "recovery"]
+        ),
+        .init(
+            section: .sleepEfficiency,
+            title: String(localized: "Sleep Efficiency"),
+            summary: String(localized: "Last night's stored sleep-efficiency value."),
+            keywords: ["sleep", "efficiency", "asleep", "bed"]
+        ),
+        .init(
+            section: .sleepDisturbances,
+            title: String(localized: "Sleep Disturbances"),
+            summary: String(localized: "The recorded disturbance count from last night."),
+            keywords: ["sleep", "disturbances", "wake", "interruptions"]
+        ),
+        .init(
+            section: .deepSleep,
+            title: String(localized: "Deep Sleep"),
+            summary: String(localized: "Last night's deep-sleep duration."),
+            keywords: ["sleep", "deep", "duration", "stage"]
+        ),
+        .init(
+            section: .remSleep,
+            title: String(localized: "REM Sleep"),
+            summary: String(localized: "Last night's REM-sleep duration."),
+            keywords: ["sleep", "rem", "duration", "stage"]
+        ),
+        .init(
+            section: .lightSleep,
+            title: String(localized: "Light Sleep"),
+            summary: String(localized: "Last night's light-sleep duration."),
+            keywords: ["sleep", "light", "duration", "stage"]
+        ),
+        .init(
+            section: .sleepDebt,
+            title: String(localized: "Sleep Debt"),
+            summary: String(localized: "How far ahead or behind your sleep need you are."),
+            keywords: ["sleep", "debt", "deficit", "need", "balance"]
+        ),
+        .init(
+            section: .recoveryForecast,
+            title: String(localized: "Recovery Forecast"),
+            summary: String(localized: "Tomorrow's projected Charge and what would change it."),
+            keywords: ["forecast", "tomorrow", "recovery", "charge", "projection"]
+        ),
+        .init(
+            section: .activity,
+            title: String(localized: "Activity"),
+            summary: String(localized: "Steps, active energy, and sessions logged today."),
+            keywords: ["steps", "activity", "calories", "energy", "move"]
+        ),
+        .init(
+            section: .stepsToday,
+            title: String(localized: "Steps Today"),
+            summary: String(localized: "The resolved step total already used by Key Metrics."),
+            keywords: ["steps", "walking", "activity", "move"]
+        ),
+        .init(
+            section: .activeEnergy,
+            title: String(localized: "Active Energy"),
+            summary: String(localized: "Today's imported or device-estimated active energy."),
+            keywords: ["energy", "calories", "kcal", "activity"]
+        ),
+        .init(
+            section: .sessionsToday,
+            title: String(localized: "Sessions Today"),
+            summary: String(localized: "The number of recorded exercise sessions today."),
+            keywords: ["sessions", "workouts", "exercise", "training"]
+        ),
+        .init(
+            section: .trainingLoad,
+            title: String(localized: "Training Load"),
+            summary: String(localized: "Acute-to-chronic load balance and training monotony."),
+            keywords: ["training", "load", "acwr", "monotony", "strain", "balance"]
+        ),
+        .init(
+            section: .heartRateZones,
+            title: String(localized: "Heart-Rate Zones"),
+            summary: String(localized: "Time spent in each zone today."),
+            keywords: ["zones", "heart rate", "training", "effort", "bpm"]
+        ),
+        .init(
+            section: .stressToday,
+            title: String(localized: "Stress Today"),
+            summary: String(localized: "The day's autonomic load and your check-ins."),
+            keywords: ["stress", "autonomic", "load", "calm", "check-in"]
+        ),
+        .init(
+            section: .stressLevel,
+            title: String(localized: "Stress Level"),
+            summary: String(localized: "The same stored stress score used by Insights."),
+            keywords: ["stress", "autonomic", "score", "load"]
+        ),
+        .init(
+            section: .fitnessAgeSummary,
+            title: String(localized: "Fitness Age"),
+            summary: String(localized: "Your latest banked fitness-age estimate."),
+            keywords: ["fitness", "age", "health", "estimate"]
+        ),
+        .init(
+            section: .vitalityScore,
+            title: String(localized: "Vitality"),
+            summary: String(localized: "Your latest banked vitality score."),
+            keywords: ["vitality", "wellness", "score", "health"]
+        ),
+        .init(
+            section: .hydration,
+            title: String(localized: "Hydration"),
+            summary: String(localized: "Today's intake against your goal, with quick add."),
+            keywords: ["water", "hydration", "drink", "intake", "goal"]
+        ),
+        .init(
+            section: .caffeine,
+            title: String(localized: "Caffeine"),
+            summary: String(localized: "Today's intake and how close the last dose is to bedtime."),
+            keywords: ["caffeine", "coffee", "espresso", "intake", "sleep"]
+        ),
+        .init(
+            section: .overnightVitals,
+            title: String(localized: "Overnight Vitals"),
+            summary: String(localized: "Blood oxygen, skin temperature, and disturbances from last night."),
+            keywords: ["spo2", "oxygen", "temperature", "overnight", "disturbances"]
+        ),
+        .init(
+            section: .skinTemperature,
+            title: String(localized: "Skin Temperature"),
+            summary: String(localized: "Last night's stored deviation from your baseline."),
+            keywords: ["skin", "temperature", "overnight", "baseline"]
+        ),
+        .init(
+            section: .bodyClock,
+            title: String(localized: "Body Clock"),
+            summary: String(localized: "Your circadian phase and tonight's wind-down window."),
+            keywords: ["circadian", "rhythm", "clock", "bedtime", "phase"]
+        ),
+        .init(
+            section: .cycleAwareness,
+            title: String(localized: "Cycle Awareness"),
+            summary: String(localized: "Your current phase and its confidence."),
+            keywords: ["cycle", "phase", "menstrual", "temperature"]
+        ),
+        .init(
+            section: .weeklyDigest,
+            title: String(localized: "This Week"),
+            summary: String(localized: "This week against last, metric by metric."),
+            keywords: ["week", "weekly", "digest", "trend", "comparison"]
+        ),
+        .init(
+            section: .streaks,
+            title: String(localized: "Streaks"),
+            summary: String(localized: "Your current run and your longest."),
+            keywords: ["streak", "consistency", "habit", "days"]
+        ),
     ]
 }
 
@@ -420,6 +786,36 @@ enum TodayMetricOwnershipMigration {
     }
 }
 
+/// Seeds the widget-library sections into the hidden set exactly once. Same shape as
+/// `TodayMetricOwnershipMigration`: a version marker is what lets someone add a library group and keep it,
+/// instead of the app re-hiding it on every launch.
+enum TodayLibraryIntroductionMigration {
+    static let versionKey = "today.libraryIntroductionVersion"
+    static let currentVersion = 2
+
+    @discardableResult
+    static func migrateIfNeeded(defaults: UserDefaults = .standard) -> Bool {
+        let installedVersion = defaults.integer(forKey: versionKey)
+        guard installedVersion < currentVersion else { return false }
+        var hiddenRaw = defaults.string(forKey: TodayLayoutPrefs.hiddenKey) ?? ""
+        if installedVersion < 1 {
+            hiddenRaw = TodayLayoutPrefs.seeding(
+                TodaySection.libraryAdditionsV1,
+                hiddenRaw: hiddenRaw
+            )
+        }
+        if installedVersion < 2 {
+            hiddenRaw = TodayLayoutPrefs.seeding(
+                TodaySection.libraryAdditionsV2,
+                hiddenRaw: hiddenRaw
+            )
+        }
+        defaults.set(hiddenRaw, forKey: TodayLayoutPrefs.hiddenKey)
+        defaults.set(currentVersion, forKey: versionKey)
+        return true
+    }
+}
+
 extension TodaySection {
     var customizationIcon: String {
         switch self {
@@ -432,6 +828,35 @@ extension TodaySection {
         case .recoveryVitals: return "heart.text.square"
         case .yourCards: return "rectangle.stack"
         case .journal: return "book.closed"
+        case .dataSources: return "arrow.triangle.2.circlepath"
+        case .sleepSummary: return "bed.double"
+        case .sleepStages: return "chart.bar.xaxis"
+        case .restorativeSleep: return "moon.stars.fill"
+        case .sleepEfficiency: return "percent"
+        case .sleepDisturbances: return "waveform.path"
+        case .deepSleep: return "moon.fill"
+        case .remSleep: return "sparkles"
+        case .lightSleep: return "moon"
+        case .sleepDebt: return "moon.zzz"
+        case .recoveryForecast: return "chart.line.uptrend.xyaxis"
+        case .trainingLoad: return "scalemass"
+        case .activity: return "figure.walk"
+        case .stepsToday: return "shoeprints.fill"
+        case .activeEnergy: return "flame.fill"
+        case .sessionsToday: return "figure.run"
+        case .heartRateZones: return "chart.bar.fill"
+        case .stressToday: return "brain.head.profile"
+        case .stressLevel: return "brain"
+        case .fitnessAgeSummary: return "figure.walk.motion"
+        case .vitalityScore: return "sparkles.rectangle.stack"
+        case .hydration: return "drop.fill"
+        case .caffeine: return "cup.and.saucer.fill"
+        case .overnightVitals: return "moon.haze"
+        case .skinTemperature: return "thermometer.medium"
+        case .bodyClock: return "clock.arrow.circlepath"
+        case .cycleAwareness: return "circle.hexagonpath"
+        case .weeklyDigest: return "calendar"
+        case .streaks: return "flame.fill"
         }
     }
 
@@ -446,6 +871,35 @@ extension TodaySection {
         case .recoveryVitals: return StrandPalette.metricCyan
         case .yourCards: return StrandPalette.accent
         case .journal: return StrandPalette.metricAmber
+        case .dataSources: return StrandPalette.metricCyan
+        case .sleepSummary: return StrandPalette.metricPurple
+        case .sleepStages: return StrandPalette.metricPurple
+        case .restorativeSleep: return StrandPalette.restColor
+        case .sleepEfficiency: return StrandPalette.restColor
+        case .sleepDisturbances: return StrandPalette.metricAmber
+        case .deepSleep: return StrandPalette.restColor
+        case .remSleep: return StrandPalette.metricPurple
+        case .lightSleep: return StrandPalette.metricCyan
+        case .sleepDebt: return StrandPalette.metricPurple
+        case .recoveryForecast: return StrandPalette.chargeColor
+        case .trainingLoad: return StrandPalette.effortColor
+        case .activity: return StrandPalette.effortColor
+        case .stepsToday: return StrandPalette.chargeColor
+        case .activeEnergy: return StrandPalette.metricAmber
+        case .sessionsToday: return StrandPalette.effortColor
+        case .heartRateZones: return StrandPalette.effortColor
+        case .stressToday: return StrandPalette.metricAmber
+        case .stressLevel: return StrandPalette.metricAmber
+        case .fitnessAgeSummary: return StrandPalette.chargeColor
+        case .vitalityScore: return StrandPalette.metricPurple
+        case .hydration: return StrandPalette.metricCyan
+        case .caffeine: return StrandPalette.metricAmber
+        case .overnightVitals: return StrandPalette.metricCyan
+        case .skinTemperature: return StrandPalette.metricAmber
+        case .bodyClock: return StrandPalette.restColor
+        case .cycleAwareness: return StrandPalette.restColor
+        case .weeklyDigest: return StrandPalette.accent
+        case .streaks: return StrandPalette.effortColor
         }
     }
 }

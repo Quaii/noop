@@ -1542,6 +1542,17 @@ fun TodayScreen(
                             days = days,
                             onOpenJournal = onOpenJournal,
                         )
+                        TodaySection.DATA_SOURCES -> TodaySourcesSection(
+                            footer,
+                            strapBatteryPct = if (liveSnap.connected) {
+                                liveSnap.batteryPct?.roundToInt()
+                            } else {
+                                null
+                            },
+                            strapBatteryEstimate = if (liveSnap.connected) batteryEstimateText else null,
+                            expanded = sourcesExpanded,
+                            onToggle = { sourcesExpanded = !sourcesExpanded },
+                        )
                     }
                 }
             }
@@ -1551,17 +1562,6 @@ fun TodayScreen(
         // toggle is off or there's nothing to suggest. Save → a manual "Workout" row; × → dismissed forever.
         if (selectedDayOffset == 0) {
             item { AutoWorkoutNudgeCard(viewModel = viewModel, days = days) }
-        }
-        // Strap battery only while the link is up AND a real reading exists, a stale % from a
-        // dropped connection must not present as live (#159).
-        item {
-            TodaySourcesSection(
-                footer,
-                strapBatteryPct = if (liveSnap.connected) liveSnap.batteryPct?.roundToInt() else null,
-                strapBatteryEstimate = if (liveSnap.connected) batteryEstimateText else null,
-                expanded = sourcesExpanded,
-                onToggle = { sourcesExpanded = !sourcesExpanded },
-            )
         }
     }
         // Material3's PullToRefreshContainer draws its indicator circle even at rest (progress 0, not
@@ -3859,24 +3859,24 @@ private fun TodayLayoutEditorDialog(
     if (showRecoveryVitalsHandoff) {
         AlertDialog(
             onDismissRequest = { showRecoveryVitalsHandoff = false },
-            title = { Text("Hide Recovery Vitals?") },
+            title = { Text(stringResource(R.string.today_hide_recovery_vitals_title)) },
             text = {
                 Text(
-                    "Recovery Vitals groups HRV, Resting HR, and Respiratory Rate. Choose whether those measurements should remain on Today as individual tiles.",
+                    stringResource(R.string.today_hide_recovery_vitals_message),
                 )
             },
             confirmButton = {
                 TextButton(onClick = { hideRecoveryVitals(keepIndividualTiles = true) }) {
-                    Text("Add missing vitals")
+                    Text(stringResource(R.string.today_add_missing_vitals))
                 }
             },
             dismissButton = {
                 Row {
                     TextButton(onClick = { showRecoveryVitalsHandoff = false }) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.today_cancel))
                     }
                     TextButton(onClick = { hideRecoveryVitals(keepIndividualTiles = false) }) {
-                        Text("Hide only", color = Palette.statusCritical)
+                        Text(stringResource(R.string.today_hide_only), color = Palette.statusCritical)
                     }
                 }
             },
@@ -4806,7 +4806,7 @@ private fun HeartRateTrendCard(
                         hrWindow != HrWindow.TODAY && buckets.size >= 2 ->
                             "No heart rate in the last ${hrWindow.label}. Try a wider window or Today."
                         else ->
-                            "No heart rate yet. Your curve fills in after the strap syncs."
+                            stringResource(R.string.today_no_heart_rate_yet)
                     },
                     style = NoopType.footnote,
                     color = Palette.textTertiary,

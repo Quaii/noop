@@ -13,6 +13,7 @@ struct TodayReorderableSections<Content: View>: View {
     private let sections: [TodaySection]
     private let coordinateSpace: String
     private let onRemove: (TodaySection) -> Void
+    private let supportedSizes: (TodaySection) -> [TodayGroupSize]
     private let content: (TodaySection, TodayGroupResizeContext) -> Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -21,7 +22,9 @@ struct TodayReorderableSections<Content: View>: View {
     @State private var sectionFrames: [TodaySection: CGRect] = [:]
     @State private var draggingSection: TodaySection?
     @State private var pickedUpOrigin: CGPoint = .zero
+    @State private var pickedUpSize: CGSize = .zero
     @State private var dragTranslation: CGSize = .zero
+    @State private var lastReorderDestination: Int?
     @State private var fingerY: CGFloat = 0
     @State private var autoScrollVelocity: CGFloat = 0
     @State private var autoScrollTask: Task<Void, Never>?
@@ -35,6 +38,9 @@ struct TodayReorderableSections<Content: View>: View {
         sections: [TodaySection],
         coordinateSpace: String,
         onRemove: @escaping (TodaySection) -> Void,
+        supportedSizes: @escaping (TodaySection) -> [TodayGroupSize] = {
+            $0.supportedGroupSizes
+        },
         @ViewBuilder content: @escaping (TodaySection, TodayGroupResizeContext) -> Content
     ) {
         _orderRaw = orderRaw
@@ -43,31 +49,29 @@ struct TodayReorderableSections<Content: View>: View {
         self.sections = sections
         self.coordinateSpace = coordinateSpace
         self.onRemove = onRemove
+        self.supportedSizes = supportedSizes
         self.content = content
     }
 
     var body: some View {
         TodayWidgetGridLayout(
             horizontalSpacing: NoopMetrics.space2,
-            verticalSpacing: NoopMetrics.gap
+            verticalSpacing: NoopMetrics.TodayReorder.groupSpacing
         ) {
             ForEach(sections) { section in
                 let liveGeometry = liveResizeGeometry(for: section)
-                sectionContainer(section)
-                    .frame(
-                        height: liveGeometry.isActive ? liveGeometry.height : nil,
-                        alignment: .top
-                    )
+                layoutSection(section, liveGeometry: liveGeometry)
                     .layoutValue(
                         key: TodayGroupColumnSpanKey.self,
-                        value: TodayGroupLayoutPrefs.size(
-                            for: section,
-                            raw: groupLayoutsRaw
-                        ).columnSpan
+                        value: presentedColumnSpan(for: section)
                     )
                     .layoutValue(
                         key: TodayGroupLiveGeometryKey.self,
                         value: liveGeometry
+                    )
+                    .layoutValue(
+                        key: TodayGroupFootprintSizeKey.self,
+                        value: fixedFootprintSize(for: section)
                     )
             }
         }
@@ -77,9 +81,6 @@ struct TodayReorderableSections<Content: View>: View {
         }
         .onPreferenceChange(TodaySectionFramePreferenceKey.self) { frames in
             sectionFrames = frames
-            if draggingSection != nil {
-                reorderIfNeeded()
-            }
         }
         .onChange(of: editScope) { _, scope in
             if scope == .sections {
@@ -96,56 +97,77 @@ struct TodayReorderableSections<Content: View>: View {
             resetDrag()
             cancelResize()
         }
-        .animation(reduceMotion ? nil : StrandMotion.interactive, value: sections)
+    }
+
+    @ViewBuilder
+    private func layoutSection(
+        _ section: TodaySection,
+        liveGeometry: TodayGroupLiveGeometry
+    ) -> some View {
+        // TodayWidgetGridLayout owns the temporary footprint. Forcing the child to the raw gesture height
+        // made empty space grow below Key Metrics after its content had already reached its largest layout.
+        sectionContainer(section)
     }
 
     private func sectionContainer(_ section: TodaySection) -> some View {
         let isDragged = draggingSection == section
         let hasInlineItems = section == .keyMetrics || section == .yourCards
-        let hasResizableGroup = section.supportedGroupSizes.count > 1
-        let usesHeaderDragSurface = hasInlineItems || hasResizableGroup
+        let hasResizableGroup = groupSizes(for: section).count > 1
+        // ONLY containers whose body belongs to their own draggable children need a header-strip handle.
+        // Being resizable used to force it too, which — now that nearly every group is resizable — meant
+        // almost every card could only be picked up by an invisible 48-point strip at its top. A group
+        // has to be grabbable anywhere on it, like an icon on the home screen. The resize grabber is a
+        // separate overlay with its own gesture, so the two do not compete.
+        let usesHeaderDragSurface = hasInlineItems
         let editingSections = editScope == .sections
         let editingThisInlineSection = editScope == .inline(section)
 
         return ZStack(alignment: .topLeading) {
-            ZStack(alignment: .topLeading) {
-                content(section, resizeContext(for: section))
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .clipped()
-                    .allowsHitTesting(
-                        !editScope.isActive
-                            || editingThisInlineSection
-                    )
-                    .accessibilityHidden(
-                        editScope.isActive
-                            && !editingThisInlineSection
-                    )
-
-                if editingSections, usesHeaderDragSurface {
-                    nestedSectionHeaderDragSurface(section)
-                }
-
-                TodayRemoveBadge(
-                    label: section.title,
-                    visible: editingSections && sections.count > 1,
-                    action: { remove(section) }
+            // Both the drag surface and the remove badge are OVERLAYS, never ZStack siblings. As siblings
+            // their 48- and 34-point boxes set the floor for the container's measured height, so a section
+            // that currently renders nothing still claimed a slot — that is the stray minus badge sitting
+            // in dead space above Data Sources. No `.clipped()` either: it was there to contain a forced
+            // height that no longer exists, and it was shearing the hero's WHOOP pill in half.
+            content(section, resizeContext(for: section))
+                .frame(maxHeight: .infinity, alignment: .top)
+                .allowsHitTesting(
+                    !editScope.isActive
+                        || editingThisInlineSection
                 )
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if editingSections, hasResizableGroup {
-                    TodayGroupResizeHandle(
-                        size: groupSizeBinding(for: section),
-                        supportedSizes: section.supportedGroupSizes,
-                        label: section.title,
-                        coordinateSpace: coordinateSpace,
-                        visualOffset: resizeHandleOffset(for: section),
-                        onDragChanged: { beginOrUpdateResize(section, translation: $0) },
-                        onDragEnded: { finishResize(section, translation: $0) }
-                    )
-                    .offset(x: 12, y: 12)
-                    .zIndex(120)
+                .accessibilityHidden(
+                    editScope.isActive
+                        && !editingThisInlineSection
+                )
+                .overlay {
+                    if editingSections, !usesHeaderDragSurface {
+                        // Foreground hit target so the held section keeps receiving movement. Remove and
+                        // resize controls are later overlays and therefore remain independently tappable.
+                        reorderDragSurface(for: section)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityHidden(true)
+                    }
                 }
-            }
+                .overlay(alignment: .topLeading) {
+                    if editingSections, usesHeaderDragSurface {
+                        nestedSectionHeaderDragSurface(section)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    TodayRemoveBadge(
+                        label: section.title,
+                        visible: editingSections && sections.count > 1,
+                        action: { remove(section) }
+                    )
+                }
+                // Inside the jiggle: the grabber belongs to its group and wobbles with it, the same way
+                // the remove badge does. It is part of the card, not a fixture the card moves beneath.
+                .overlayPreferenceValue(TodayResizeHandleAnchorPreferenceKey.self) { anchor in
+                    resizeHandleOverlay(
+                        for: section,
+                        anchor: anchor,
+                        visible: editingSections && hasResizableGroup
+                    )
+                }
             .modifier(
                 TodayReorderJiggleModifier(
                     stableID: section.rawValue,
@@ -172,11 +194,9 @@ struct TodayReorderableSections<Content: View>: View {
                 )
             }
         }
-        .zIndex(isDragged ? 10 : 0)
-        .simultaneousGesture(
-            reorderGesture(for: section),
-            including: editingSections && !usesHeaderDragSurface ? .all : .none
-        )
+        // A lifted or resizing section draws above its neighbours; a group widening across a row partner
+        // must pass over it, not under it.
+        .zIndex(isDragged || resizeSession?.section == section ? 10 : 0)
         // Give edit activation priority over any NavigationLink inside the section. Otherwise one release
         // can both enter jiggle mode and push the card's destination.
         .highPriorityGesture(
@@ -191,13 +211,9 @@ struct TodayReorderableSections<Content: View>: View {
 
     private func groupSizeBinding(for section: TodaySection) -> Binding<TodayGroupSize> {
         Binding(
-            get: {
-                TodayGroupLayoutPrefs.size(
-                    for: section,
-                    raw: groupLayoutsRaw
-                )
-            },
+            get: { restingGroupSize(for: section) },
             set: { next in
+                guard groupSizes(for: section).contains(next) else { return }
                 groupLayoutsRaw = TodayGroupLayoutPrefs.setting(
                     next,
                     for: section,
@@ -207,103 +223,223 @@ struct TodayReorderableSections<Content: View>: View {
         )
     }
 
+    private func groupSizes(for section: TodaySection) -> [TodayGroupSize] {
+        let sizes = supportedSizes(section)
+        return sizes.isEmpty ? [section.defaultGroupSize] : sizes
+    }
+
+    /// The two editable collections are content-count driven: their heights follow the number of selected
+    /// rows rather than a square virtual shell. Other resizable widgets keep the standardized footprint
+    /// that lets independent 1×1 cards align in the two-column canvas. Legacy, non-resizable sections keep
+    /// their real intrinsic height; forcing Start Session or the score hero into those widget shells
+    /// produces large empty cards.
+    private func fixedFootprintSize(for section: TodaySection) -> TodayGroupSize? {
+        guard section != .yourCards,
+              section != .keyMetrics,
+              groupSizes(for: section).count > 1 else {
+            return nil
+        }
+        return presentedGroupSize(for: section)
+    }
+
+    private func restingGroupSize(for section: TodaySection) -> TodayGroupSize {
+        let configured = TodayGroupLayoutPrefs.size(for: section, raw: groupLayoutsRaw)
+        let sizes = groupSizes(for: section)
+        return sizes.contains(configured) ? configured : (sizes.first ?? section.defaultGroupSize)
+    }
+
+    private func resizeAxis(for section: TodaySection) -> TodayGroupResizeAxis {
+        TodayGroupResizeAxis.forSizes(groupSizes(for: section))
+    }
+
+    /// Every resizable group carries the same corner grabber, sitting ON its rounded corner. It used to be
+    /// pushed outward by a positive inset, which left it floating in the gutter beside the card instead of
+    /// attached to the card it resizes.
+    private var resizeHandleOffset: CGSize {
+        let inset = NoopMetrics.TodayReorder.resizeHandleOffset
+        return CGSize(width: inset, height: inset)
+    }
+
+    private func resizeHandleOverlay(
+        for section: TodaySection,
+        anchor: Anchor<CGRect>?,
+        visible: Bool
+    ) -> some View {
+        GeometryReader { proxy in
+            if visible {
+                // Your Cards supplies its anchor from the last child in a lazy grid. Even when the rows
+                // are not being edited, that child preference is recomputed during the parent jiggle and
+                // makes the grabber bounce independently. Its group now measures intrinsic content, so
+                // the stable section bounds are the correct corner. Key Metrics still needs its explicit
+                // last-tile anchor because the "Show all metrics" footer sits below the actual card edge.
+                let stableAnchor = section == .yourCards ? nil : anchor
+                let target = stableAnchor.map { proxy[$0] }
+                    ?? CGRect(origin: .zero, size: proxy.size)
+                let side = NoopMetrics.TodayReorder.resizeHandleHitTarget
+                TodayGroupResizeHandle(
+                    size: groupSizeBinding(for: section),
+                    supportedSizes: groupSizes(for: section),
+                    axis: resizeAxis(for: section),
+                    label: section.title,
+                    coordinateSpace: coordinateSpace,
+                    onDragChanged: { beginOrUpdateResize(section, translation: $0) },
+                    onDragEnded: { translation, predicted in
+                        finishResize(
+                            section,
+                            translation: translation,
+                            predictedTranslation: predicted
+                        )
+                    }
+                )
+                .position(
+                    x: target.maxX - side / 2 + resizeHandleOffset.width,
+                    y: target.maxY - side / 2 + resizeHandleOffset.height
+                )
+                .zIndex(120)
+            }
+        }
+    }
+
     private func beginOrUpdateResize(_ section: TodaySection, translation: CGSize) {
         if resizeSession?.section != section {
             guard let frame = sectionFrames[section] else { return }
+            let sizes = groupSizes(for: section)
+            let startSize = restingGroupSize(for: section)
+            guard let startIndex = sizes.firstIndex(of: startSize) else { return }
             stopAutoScroll()
             scrollProxy.setUserScrollingEnabled(false)
             resizeSession = TodayGroupResizeSession(
                 section: section,
                 startFrame: frame,
-                startSize: TodayGroupLayoutPrefs.size(
-                    for: section,
-                    raw: groupLayoutsRaw
-                ),
-                translation: translation
+                startSize: startSize,
+                startIndex: startIndex,
+                translation: translation,
+                // The drag opens on the footprint the group is already showing, so nothing about the
+                // section's content changes until an actual boundary is crossed.
+                detentIndex: startIndex
             )
         } else {
             resizeSession?.translation = translation
         }
+        updateDetentIfNeeded()
     }
 
-    private func resizeHandleOffset(for section: TodaySection) -> CGSize {
-        // The handle belongs to the live group geometry, not to the raw finger translation. Unsupported
-        // movement (for example dragging Workouts downward) therefore leaves both the group and its
-        // corner in place instead of detaching the handle or opening empty layout space.
-        .zero
+    /// Tick the presented footprint as the finger crosses a boundary, exactly as the home screen does.
+    /// Without this the only feedback in the whole gesture arrives after the finger has already lifted.
+    private func updateDetentIfNeeded() {
+        guard let session = resizeSession else { return }
+        let sizes = groupSizes(for: session.section)
+        let next = TodayGroupResizeMath.detent(
+            for: continuousSizeIndex(for: session),
+            current: session.detentIndex,
+            sizeCount: sizes.count
+        )
+        guard next != session.detentIndex else { return }
+        StrandHaptic.selection.play()
+        withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
+            resizeSession?.detentIndex = next
+        }
     }
 
+    /// The number of columns a section occupies RIGHT NOW: the footprint it is presenting, which during
+    /// a resize is the detent rather than the stored size. Snapping here is what makes the group change
+    /// size in one animated step instead of stretching through widths no footprint has.
+    private func presentedColumnSpan(for section: TodaySection) -> Int {
+        presentedGroupSize(for: section).columnSpan
+    }
+
+    private func presentedGroupSize(for section: TodaySection) -> TodayGroupSize {
+        let resting = restingGroupSize(for: section)
+        guard let session = resizeSession, session.section == section else { return resting }
+        let sizes = groupSizes(for: section)
+        guard sizes.indices.contains(session.detentIndex) else { return resting }
+        return sizes[session.detentIndex]
+    }
+
+    /// The section's actual bounds while the corner is held. Persistence remains detent-based, but the
+    /// visible card follows the finger between those detents instead of waiting at its old footprint and
+    /// jumping after a threshold.
     private func liveResizeGeometry(for section: TodaySection) -> TodayGroupLiveGeometry {
         guard let session = resizeSession, session.section == section else {
             return .inactive
         }
 
-        let canvasMinX = sectionFrames.values.map(\.minX).min() ?? session.startFrame.minX
-        let fullWidth = sectionFrames.values.map(\.width).max() ?? session.startFrame.width
+        let fullWidth = resizeCanvasWidth(for: session)
         let columnWidth = max(1, (fullWidth - NoopMetrics.space2) / 2)
-        let startRelativeX = session.startFrame.minX - canvasMinX
-        let continuousIndex = continuousSizeIndex(for: session)
-        let widthProgress = min(1, continuousIndex)
-        let width = columnWidth + (fullWidth - columnWidth) * widthProgress
-        let originX = min(max(0, startRelativeX), max(0, fullWidth - width))
+        // The resize math retains a small rubber-band value for release intent, but the rendered group
+        // itself must never exceed its declared smallest/largest footprint. Scaling the complete section
+        // past the endpoint changed both width and height even when that axis had no larger size.
+        let continuous = boundedSizeIndex(for: session)
+        let startIndex = CGFloat(session.startIndex)
 
-        let sizes = section.supportedGroupSizes
-        let startIndex = CGFloat(sizes.firstIndex(of: session.startSize) ?? 0)
-        let height = min(
-            460,
-            max(
-                92,
-                session.startFrame.height
-                    + restingHeightOffset(
-                        for: section,
-                        sizeIndex: continuousIndex
-                    )
-                    - restingHeightOffset(
-                        for: section,
-                        sizeIndex: startIndex
-                    )
-            )
-        )
+        let widthProgress: CGFloat
+        switch resizeAxis(for: section) {
+        case .vertical:
+            widthProgress = 1
+        case .horizontal, .both:
+            widthProgress = min(1, max(0, continuous))
+        }
+        let width = columnWidth + (fullWidth - columnWidth) * widthProgress
+
+        // Once a new footprint is presented, interpolate from the original measured height toward that
+        // footprint's real intrinsic height. This is deliberately independent of the generic 110-point
+        // input travel: that distance controls the finger, not how much blank layout the group owns.
+        let targetIndex = CGFloat(session.detentIndex)
+        let rungDistance = abs(targetIndex - startIndex)
+        let heightProgress = rungDistance > 0
+            ? min(1, abs(continuous - startIndex) / rungDistance)
+            : 0
 
         return TodayGroupLiveGeometry(
             isActive: true,
-            originX: originX,
             width: width,
-            height: height
+            startHeight: session.startFrame.height,
+            heightProgress: heightProgress
         )
     }
 
     private func resizeContext(for section: TodaySection) -> TodayGroupResizeContext {
-        let sizes = section.supportedGroupSizes
-        let restingSize = TodayGroupLayoutPrefs.size(for: section, raw: groupLayoutsRaw)
+        let sizes = groupSizes(for: section)
+        let restingSize = restingGroupSize(for: section)
         guard let restingIndex = sizes.firstIndex(of: restingSize) else {
             return .inactive
         }
         guard let session = resizeSession, session.section == section else {
             return TodayGroupResizeContext(
                 isActive: false,
-                continuousSizeIndex: CGFloat(restingIndex)
+                continuousSizeIndex: CGFloat(restingIndex),
+                detentSizeIndex: restingIndex
             )
         }
         return TodayGroupResizeContext(
             isActive: true,
-            continuousSizeIndex: continuousSizeIndex(for: session)
+            continuousSizeIndex: boundedSizeIndex(for: session),
+            detentSizeIndex: session.detentIndex
         )
     }
 
-    private func finishResize(_ section: TodaySection, translation: CGSize) {
+    private func finishResize(
+        _ section: TodaySection,
+        translation: CGSize,
+        predictedTranslation: CGSize
+    ) {
         guard let session = resizeSession, session.section == section else { return }
-        let sizes = section.supportedGroupSizes
+        let sizes = groupSizes(for: section)
         guard sizes.contains(session.startSize) else {
             cancelResize()
             return
         }
 
-        var finalSession = session
-        finalSession.translation = translation
-        let targetIndex = min(
-            max(Int(continuousSizeIndex(for: finalSession).rounded()), 0),
-            sizes.count - 1
+        var settled = session
+        settled.translation = translation
+        var flicked = session
+        flicked.translation = predictedTranslation
+
+        let targetIndex = TodayGroupResizeMath.committedIndex(
+            continuous: continuousSizeIndex(for: settled),
+            projected: continuousSizeIndex(for: flicked),
+            current: session.detentIndex,
+            sizeCount: sizes.count
         )
         let targetSize = sizes[targetIndex]
 
@@ -316,7 +452,9 @@ struct TodayReorderableSections<Content: View>: View {
             )
             resizeSession = nil
         }
-        if targetSize != session.startSize {
+        // A tick already fired for every boundary the finger crossed; only a flick that carries the group
+        // past where it settled is still unannounced.
+        if targetIndex != session.detentIndex {
             StrandHaptic.selection.play()
         }
     }
@@ -327,87 +465,55 @@ struct TodayReorderableSections<Content: View>: View {
         resizeSession = nil
     }
 
-    private func continuousSizeIndex(for session: TodayGroupResizeSession) -> CGFloat {
-        let sizes = session.section.supportedGroupSizes
-        guard let startIndex = sizes.firstIndex(of: session.startSize) else { return 0 }
-
-        let fullWidth = sectionFrames.values.map(\.width).max() ?? session.startFrame.width
-        let columnWidth = max(1, (fullWidth - NoopMetrics.space2) / 2)
-        let horizontalTravel = max(1, fullWidth - columnWidth)
-        let rawIndex: CGFloat
-
-        if sizes.count == 2 {
-            // These groups only have 1×1 and 2×1 presentations. Their handle is horizontal-only; vertical
-            // movement is deliberately ignored so it cannot manufacture unsupported empty height.
-            rawIndex = CGFloat(startIndex) + session.translation.width / horizontalTravel
-        } else {
-            switch startIndex {
-            case 0:
-                rawIndex = max(0, session.translation.width / horizontalTravel)
-                    + max(0, session.translation.height / 110)
-            case 1:
-                rawIndex = 1
-                    + min(0, session.translation.width / horizontalTravel)
-                    + max(0, session.translation.height / 110)
-            default:
-                rawIndex = 2
-                    + min(0, session.translation.height / 110)
-                    + min(0, session.translation.width / horizontalTravel)
-            }
-        }
-
-        return min(CGFloat(sizes.count - 1), max(0, rawIndex))
+    /// The canvas width the resize ladder is measured against. Section frames are the source of truth so
+    /// this follows rotation and iPad width without storing anything.
+    private func resizeCanvasWidth(for session: TodayGroupResizeSession) -> CGFloat {
+        max(1, sectionFrames.values.map(\.width).max() ?? session.startFrame.width)
     }
 
-    private func restingHeightOffset(
-        for section: TodaySection,
-        sizeIndex: CGFloat
-    ) -> CGFloat {
-        if section == .keyMetrics {
-            if sizeIndex <= 1 {
-                return 62 * (1 - sizeIndex)
-            }
-            return 110 * (sizeIndex - 1)
-        }
-        // A half-width card is slightly taller so its real compact content remains legible.
-        return 28 * (1 - min(1, sizeIndex))
+    private func continuousSizeIndex(for session: TodayGroupResizeSession) -> CGFloat {
+        let fullWidth = resizeCanvasWidth(for: session)
+        let columnWidth = max(1, (fullWidth - NoopMetrics.space2) / 2)
+        return TodayGroupResizeMath.continuousIndex(
+            startIndex: session.startIndex,
+            translation: session.translation,
+            axis: resizeAxis(for: session.section),
+            sizeCount: groupSizes(for: session.section).count,
+            horizontalTravel: max(1, fullWidth - columnWidth)
+        )
+    }
+
+    private func boundedSizeIndex(for session: TodayGroupResizeSession) -> CGFloat {
+        let maximum = CGFloat(max(0, groupSizes(for: session.section).count - 1))
+        return min(maximum, max(0, continuousSizeIndex(for: session)))
     }
 
     /// Key Metrics and Your Cards reserve their direct gestures for their children. Once editing is
     /// active, their existing header itself moves the complete group; no extra icon or handle is drawn.
     private func nestedSectionHeaderDragSurface(_ section: TodaySection) -> some View {
-        Rectangle()
-            .fill(.clear)
-            .contentShape(Rectangle())
+        reorderDragSurface(for: section)
+            .frame(maxWidth: .infinity)
             .frame(height: NoopMetrics.controlHeight)
-            .simultaneousGesture(
-                reorderGesture(for: section),
-                including: editScope == .sections ? .all : .none
-            )
             .accessibilityHidden(true)
     }
 
-    /// Once edit mode is active, an ordinary flick must stay owned by the enclosing ScrollView.
-    /// Holding briefly before dragging lifts the section instead, matching the Quick Launch editor.
-    private func reorderGesture(for section: TodaySection) -> some Gesture {
-        LongPressGesture(
+    /// The native scroll pan and this hold recognizer remain simultaneous until the hold positively begins.
+    /// Only then does `handleDragChanged` pause user scrolling and hand movement to the lifted section.
+    private func reorderDragSurface(for section: TodaySection) -> some View {
+        TodayReorderLongPressDragSurface(
+            isEnabled: editScope == .sections,
             minimumDuration: StrandMotion.reorderHoldDuration,
-            maximumDistance: NoopMetrics.TodayReorder.holdMovementTolerance
+            movementTolerance: NoopMetrics.TodayReorder.holdMovementTolerance,
+            onBegan: { handleDragChanged($0, section: section) },
+            onChanged: { handleDragChanged($0, section: section) },
+            onEnded: { _, cancelled in
+                if cancelled {
+                    resetDrag()
+                } else {
+                    finishDrag()
+                }
+            }
         )
-        .sequenced(
-            before: DragGesture(
-                minimumDistance: 0,
-                coordinateSpace: .named(coordinateSpace)
-            )
-        )
-        .onChanged { value in
-            guard case .second(true, let drag?) = value else { return }
-            handleDragChanged(drag, section: section)
-        }
-        .onEnded { value in
-            guard case .second(true, _) = value else { return }
-            finishDrag()
-        }
     }
 
     private func sectionAccessibilitySurface(_ section: TodaySection) -> some View {
@@ -441,13 +547,17 @@ struct TodayReorderableSections<Content: View>: View {
         }
     }
 
-    private func handleDragChanged(_ value: DragGesture.Value, section: TodaySection) {
+    private func handleDragChanged(_ value: TodayReorderGestureValue, section: TodaySection) {
         if draggingSection == nil {
             guard let frame = sectionFrames[section] else { return }
             settleTask?.cancel()
             settleTask = nil
             draggingSection = section
             pickedUpOrigin = frame.origin
+            pickedUpSize = frame.size
+            lastReorderDestination = sections.firstIndex(of: section)
+            // Only lock the feed after the deliberate hold has succeeded. An ordinary flick cancels the
+            // hold at eight points and never reaches this branch, so native scrolling remains untouched.
             scrollProxy.setUserScrollingEnabled(false)
             StrandHaptic.light.play()
         }
@@ -460,23 +570,58 @@ struct TodayReorderableSections<Content: View>: View {
     }
 
     private func reorderIfNeeded() {
-        guard let dragged = draggingSection,
-              let draggedFrame = sectionFrames[dragged] else { return }
+        guard let dragged = draggingSection else { return }
         let draggedCenter = CGPoint(
-            x: pickedUpOrigin.x + dragTranslation.width + draggedFrame.width / 2,
-            y: pickedUpOrigin.y + dragTranslation.height + draggedFrame.height / 2
+            x: pickedUpOrigin.x + dragTranslation.width + pickedUpSize.width / 2,
+            y: pickedUpOrigin.y + dragTranslation.height + pickedUpSize.height / 2
         )
-        guard let target = sections.first(where: { section in
-            guard section != dragged, let frame = sectionFrames[section] else { return false }
-            return frame.contains(draggedCenter)
-        }) else { return }
 
+        // Resolve the PHYSICAL grid slot under the lifted section, not the identity of the section that
+        // happens to occupy it. Once a reorder animates, identities move but slots stay put. The old
+        // identity-based swap therefore immediately reversed itself against the same stationary finger.
+        guard let destination = destinationIndex(under: draggedCenter) else { return }
+        guard destination != lastReorderDestination else { return }
+        lastReorderDestination = destination
+        let reorderedVisible = TodayLayoutPrefs.moving(
+            dragged,
+            toIndex: destination,
+            in: sections
+        )
+        guard reorderedVisible != sections else { return }
+
+        // Hidden groups keep their persisted relative slots while the visible groups are replaced in
+        // their new visual order. This makes the stored list match exactly what the user arranged without
+        // dragging invisible entries through the feed.
         let order = TodayLayoutPrefs.decodeOrder(orderRaw)
-        let next = TodayLayoutPrefs.moving(dragged, to: target, in: order)
+        let visibleSet = Set(sections)
+        var visibleIterator = reorderedVisible.makeIterator()
+        let next = order.map { visibleSet.contains($0) ? (visibleIterator.next() ?? $0) : $0 }
         guard next != order else { return }
+        StrandHaptic.selection.play()
         withAnimation(reduceMotion ? nil : StrandMotion.interactive) {
             orderRaw = TodayLayoutPrefs.encode(next)
         }
+    }
+
+    /// Nearest visual slot in row-major `sections` order. Distance is measured to the rectangle edge
+    /// rather than only its centre, so a tall full-width group remains the target anywhere inside it.
+    private func destinationIndex(under point: CGPoint) -> Int? {
+        sections.enumerated()
+            .compactMap { index, section -> (Int, CGFloat)? in
+                guard let frame = sectionFrames[section], frame.width > 0, frame.height > 0 else {
+                    return nil
+                }
+                let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
+                let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
+                let edgeDistance = dx * dx + dy * dy
+                // Break a zero-distance tie deterministically inside overlapping animated frames.
+                let nx = (point.x - frame.midX) / max(1, frame.width)
+                let ny = (point.y - frame.midY) / max(1, frame.height)
+                let centreTieBreak = (nx * nx + ny * ny) * 0.001
+                return (index, edgeDistance + centreTieBreak)
+            }
+            .min { $0.1 < $1.1 }?
+            .0
     }
 
     private func finishDrag() {
@@ -596,7 +741,9 @@ struct TodayReorderableSections<Content: View>: View {
         scrollProxy.setUserScrollingEnabled(true)
         draggingSection = nil
         pickedUpOrigin = .zero
+        pickedUpSize = .zero
         dragTranslation = .zero
+        lastReorderDestination = nil
         fingerY = 0
     }
 }
@@ -616,25 +763,33 @@ private struct TodayGroupResizeSession {
     let section: TodaySection
     let startFrame: CGRect
     let startSize: TodayGroupSize
+    let startIndex: Int
     var translation: CGSize
+    /// The footprint currently being presented. Distinct from the continuous finger position: it only
+    /// changes once a boundary has been cleared by the hysteresis margin, and each change is a haptic tick.
+    var detentIndex: Int
 }
 
 private struct TodayGroupColumnSpanKey: LayoutValueKey {
     static let defaultValue = 2
 }
 
+private struct TodayGroupFootprintSizeKey: LayoutValueKey {
+    static let defaultValue: TodayGroupSize? = nil
+}
+
 private struct TodayGroupLiveGeometry: Equatable {
     static let inactive = TodayGroupLiveGeometry(
         isActive: false,
-        originX: 0,
         width: 0,
-        height: 0
+        startHeight: 0,
+        heightProgress: 0
     )
 
     let isActive: Bool
-    let originX: CGFloat
     let width: CGFloat
-    let height: CGFloat
+    let startHeight: CGFloat
+    let heightProgress: CGFloat
 }
 
 private struct TodayGroupLiveGeometryKey: LayoutValueKey {
@@ -696,9 +851,27 @@ private struct TodayWidgetGridLayout: Layout {
         var y: CGFloat = 0
 
         func measuredHeight(index: Int, proposedWidth: CGFloat) -> CGFloat {
-            subviews[index]
+            let intrinsicHeight = subviews[index]
                 .sizeThatFits(ProposedViewSize(width: proposedWidth, height: nil))
                 .height
+            guard let footprint = subviews[index][TodayGroupFootprintSizeKey.self] else {
+                return intrinsicHeight
+            }
+            // The footprint is a shared minimum, not a clip rect. Expanded Synthesis and accessibility
+            // text may legitimately need more room; they grow the row instead of overlapping its neighbour.
+            return max(
+                intrinsicHeight,
+                TodayWidgetFootprint.height(
+                    size: footprint,
+                    canvasWidth: width,
+                    horizontalSpacing: horizontalSpacing,
+                    verticalSpacing: verticalSpacing
+                )
+            )
+        }
+
+        func span(at index: Int) -> Int {
+            min(2, max(1, subviews[index][TodayGroupColumnSpanKey.self]))
         }
 
         func flushPendingSmall() {
@@ -718,25 +891,70 @@ private struct TodayWidgetGridLayout: Layout {
         for index in subviews.indices {
             let liveGeometry = subviews[index][TodayGroupLiveGeometryKey.self]
             if liveGeometry.isActive {
+                let currentSpan = span(at: index)
+                // Until the detent actually changes family, a held 1×1 remains in its paired row. Once it
+                // becomes 2×1, flush the left-hand card and place this group on the next row at x=0; the
+                // live width then grows toward the trailing edge. This mirrors the home-screen reflow and
+                // avoids the old "drop down immediately, then expand left" motion.
+                if currentSpan == 1 {
+                    let height = measuredHeight(index: index, proposedWidth: columnWidth)
+                    if let left = pendingSmall {
+                        let rowHeight = max(left.height, height)
+                        placements.append(
+                            Placement(
+                                index: left.index,
+                                origin: CGPoint(x: 0, y: y),
+                                width: columnWidth,
+                                height: rowHeight
+                            )
+                        )
+                        placements.append(
+                            Placement(
+                                index: index,
+                                origin: CGPoint(x: columnWidth + horizontalSpacing, y: y),
+                                width: columnWidth,
+                                height: rowHeight
+                            )
+                        )
+                        y += rowHeight + verticalSpacing
+                        pendingSmall = nil
+                    } else {
+                        pendingSmall = (index, height)
+                    }
+                    continue
+                }
+
                 flushPendingSmall()
+                let intrinsicHeight = measuredHeight(
+                    index: index,
+                    proposedWidth: liveGeometry.width
+                )
+                // Move subsequent groups continuously while the shell follows the corner. Previously a
+                // horizontal compact/detail swap kept the original height until release, so Last Workout
+                // appeared to resize in place and then kicked the whole feed down afterward.
+                let placedHeight = TodayGroupResizeMath.interpolatedLiveHeight(
+                    start: liveGeometry.startHeight,
+                    presented: intrinsicHeight,
+                    progress: liveGeometry.heightProgress
+                )
                 placements.append(
                     Placement(
                         index: index,
-                        origin: CGPoint(x: liveGeometry.originX, y: y),
+                        origin: CGPoint(x: 0, y: y),
                         width: liveGeometry.width,
-                        height: liveGeometry.height
+                        height: placedHeight
                     )
                 )
-                y += liveGeometry.height + verticalSpacing
+                y += placedHeight + verticalSpacing
                 continue
             }
 
-            let span = min(2, max(1, subviews[index][TodayGroupColumnSpanKey.self]))
-            let proposedWidth = span == 1 ? columnWidth : width
+            let currentSpan = span(at: index)
+            let proposedWidth = currentSpan == 1 ? columnWidth : width
             let height = measuredHeight(index: index, proposedWidth: proposedWidth)
             guard height > 0 else { continue }
 
-            if span == 2 {
+            if currentSpan == 2 {
                 flushPendingSmall()
                 placements.append(
                     Placement(
@@ -748,12 +966,15 @@ private struct TodayWidgetGridLayout: Layout {
                 )
                 y += height + verticalSpacing
             } else if let left = pendingSmall {
+                // Every 1×1 uses the same footprint height by construction. Keep `max` as a defensive
+                // fallback for any future non-widget one-column content.
+                let rowHeight = max(left.height, height)
                 placements.append(
                     Placement(
                         index: left.index,
                         origin: CGPoint(x: 0, y: y),
                         width: columnWidth,
-                        height: left.height
+                        height: rowHeight
                     )
                 )
                 placements.append(
@@ -761,10 +982,10 @@ private struct TodayWidgetGridLayout: Layout {
                         index: index,
                         origin: CGPoint(x: columnWidth + horizontalSpacing, y: y),
                         width: columnWidth,
-                        height: height
+                        height: rowHeight
                     )
                 )
-                y += max(left.height, height) + verticalSpacing
+                y += rowHeight + verticalSpacing
                 pendingSmall = nil
             } else {
                 pendingSmall = (index, height)

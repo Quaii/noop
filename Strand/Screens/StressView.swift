@@ -606,19 +606,9 @@ private struct StressHeroGauge: View {
     }
 }
 
-// MARK: - Stress band
+// MARK: - Stress band presentation
 
-enum StressBand {
-    case low, medium, high
-
-    init(score: Double) {
-        switch score {
-        case ..<1.0: self = .low
-        case ..<2.0: self = .medium
-        default:     self = .high
-        }
-    }
-
+extension StressBand {
     var title: String {
         switch self {
         case .low:    return String(localized: "LOW")
