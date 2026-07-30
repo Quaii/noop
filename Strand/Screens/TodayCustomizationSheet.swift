@@ -452,7 +452,12 @@ private struct TodayGroupGalleryCard<Preview: View>: View {
             // The production section builder receives the selected gallery footprint explicitly. The
             // user's saved Today size is intentionally ignored here, exactly like the iOS widget gallery:
             // switching 1×1 / 2×1 / 2×2 previews each real component before adding it.
-            TodayGroupGalleryPreviewLayout(columnSpan: resolvedPreviewSize.columnSpan) {
+            TodayGroupGalleryPreviewLayout(
+                size: resolvedPreviewSize,
+                appliesFootprint: descriptor.section != .keyMetrics
+                    && descriptor.section != .yourCards
+                    && supportedSizes.count > 1
+            ) {
                 preview(resolvedPreviewSize)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -477,9 +482,30 @@ private struct TodayGroupGalleryCard<Preview: View>: View {
 
 /// Proposes the same one- or two-column width the section receives on Today while keeping the gallery row
 /// full-width for its title and controls.
+/// Sizes a gallery preview EXACTLY as the real canvas would.
+///
+/// It used to propose `height: nil`, so a preview rendered at the component's intrinsic height while
+/// `TodayWidgetGridLayout` floors the same component at `TodayWidgetFootprint.height`. A widget whose
+/// content is short therefore looked thin in the gallery and tall on Today — and, worse, the gallery hid
+/// exactly the empty space the owner was about to add to their screen.
 private struct TodayGroupGalleryPreviewLayout: Layout {
-    let columnSpan: Int
+    let size: TodayGroupSize
+    /// Mirrors `fixedFootprintSize` on the canvas. Sections that keep their intrinsic height there —
+    /// Quick Start, Synthesis, and the two content-count-driven collections — must keep it here too, or
+    /// the preview invents empty space the real screen never shows.
+    let appliesFootprint: Bool
     private let spacing = NoopMetrics.space2
+    private var columnSpan: Int { size.columnSpan }
+
+    private func footprintHeight(canvasWidth: CGFloat) -> CGFloat {
+        guard appliesFootprint else { return 0 }
+        return TodayWidgetFootprint.height(
+            size: size,
+            canvasWidth: canvasWidth,
+            horizontalSpacing: spacing,
+            verticalSpacing: NoopMetrics.TodayReorder.groupSpacing
+        )
+    }
 
     func sizeThatFits(
         proposal: ProposedViewSize,
@@ -491,10 +517,13 @@ private struct TodayGroupGalleryPreviewLayout: Layout {
         let targetWidth = columnSpan == 1
             ? max(0, (availableWidth - spacing) / 2)
             : availableWidth
-        let size = subview.sizeThatFits(
+        let intrinsic = subview.sizeThatFits(
             ProposedViewSize(width: targetWidth, height: nil)
         )
-        return CGSize(width: availableWidth, height: size.height)
+        return CGSize(
+            width: availableWidth,
+            height: max(intrinsic.height, footprintHeight(canvasWidth: availableWidth))
+        )
     }
 
     func placeSubviews(
@@ -507,10 +536,16 @@ private struct TodayGroupGalleryPreviewLayout: Layout {
         let targetWidth = columnSpan == 1
             ? max(0, (bounds.width - spacing) / 2)
             : bounds.width
+        let intrinsic = subview.sizeThatFits(
+            ProposedViewSize(width: targetWidth, height: nil)
+        ).height
         subview.place(
             at: bounds.origin,
             anchor: .topLeading,
-            proposal: ProposedViewSize(width: targetWidth, height: nil)
+            proposal: ProposedViewSize(
+                width: targetWidth,
+                height: max(intrinsic, footprintHeight(canvasWidth: bounds.width))
+            )
         )
     }
 }

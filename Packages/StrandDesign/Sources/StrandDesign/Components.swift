@@ -131,6 +131,10 @@ public enum NoopMetrics {
     /// semantic because the same real component renders in the gallery and on the Today canvas.
     public enum TodayWidget {
         public static let headlineNumberSize: CGFloat = 22
+        /// A 1×1 is a SQUARE — a 22-point value floats in it no matter where the spacers put it. The
+        /// compact footprint carries the value at display size so the content fills its own shell, the
+        /// way a small home-screen widget does.
+        public static let compactHeadlineNumberSize: CGFloat = 34
         public static let rowNumberSize: CGFloat = 15
         public static let iconSymbolSize: CGFloat = 16
         public static let iconColumnWidth: CGFloat = 22

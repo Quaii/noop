@@ -1425,7 +1425,9 @@ struct LiquidTodayView: View {
                         compact: compact
                     )
                 }
-                .frame(maxHeight: .infinity, alignment: .center)
+                // The rows distribute themselves (see `vitalRow`), so this only needs to claim the
+                // height. Centring a fixed-height block left dead bands above and below it.
+                .frame(maxHeight: .infinity)
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -1441,6 +1443,8 @@ struct LiquidTodayView: View {
         _ frac: Double?,
         compact: Bool = false
     ) -> some View {
+        // Each row claims an equal share of the card's height, so three rows fill a 2×1 shell on a real
+        // rhythm. Fixed 6-point gaps left the block floating with dead bands above and below it.
         HStack(spacing: compact ? 7 : 12) {
             LiquidVessel(value: frac, tint: tint, animated: false)
                 .frame(width: compact ? 22 : 30, height: compact ? 22 : 30)
@@ -1456,6 +1460,7 @@ struct LiquidTodayView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
+        .frame(maxHeight: .infinity)
     }
 
     // MARK: - Key metrics grid
@@ -1909,27 +1914,34 @@ struct LiquidTodayView: View {
             fillsHeight: true,
             resizeContext: resizeContext
         ) {
-            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+            // Three bands, like every other 1×1: what it was, how hard, and a bar to close the square.
+            // The elements used to stack at the top with `space2` between them and nothing below, which
+            // left the bottom third of the card empty — the same fault the focused metrics had.
+            VStack(alignment: .leading, spacing: NoopMetrics.TodayWidget.denseSpacing) {
                 Text(WorkoutSource.displaySport(workout.sport))
-                    .font(StrandFont.number(14))
+                    .font(StrandFont.number(NoopMetrics.TodayWidget.rowNumberSize))
                     .foregroundStyle(StrandPalette.textPrimary)
                     .lineLimit(1)
-                (Text(effortText(workout.strain)).font(StrandFont.number(17))
-                    + Text(" EFFORT").font(StrandFont.overlineScaled(7)))
-                    .foregroundStyle(StrandPalette.effortColor)
-                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(workoutSub(workout))
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                Spacer(minLength: 0)
+                (Text(effortText(workout.strain))
+                    .font(StrandFont.number(NoopMetrics.TodayWidget.headlineNumberSize))
+                    + Text(" EFFORT").font(StrandFont.overlineScaled(9)))
+                    .foregroundStyle(StrandPalette.effortColor)
+                    .lineLimit(1)
                 LiquidTube(
                     frac: (workout.strain ?? 0) / 100,
                     tint: StrandPalette.effortColor,
-                    height: 8,
+                    height: NoopMetrics.TodayWidget.progressHeight,
                     animated: false
                 )
             }
+            .frame(maxHeight: .infinity, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .center)
         }
     }
@@ -1943,9 +1955,9 @@ struct LiquidTodayView: View {
             fillsHeight: true,
             resizeContext: resizeContext
         ) {
-            // The widget always represents the most recent workout, even when it is the only one. The
-            // summary gets the visual weight; flexible space anchors the effort tube to the card's lower
-            // edge so the standardized height reads as deliberate instead of empty.
+            // The card height is FIXED by the unified footprint, so the content is what adapts: each band
+            // claims an equal share of it rather than stacking at the top and leaving a dead strip below.
+            // Same principle as the Recovery Vitals rows.
             VStack(alignment: .leading, spacing: NoopMetrics.TodayWidget.baselineSpacing) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(
@@ -1968,15 +1980,20 @@ struct LiquidTodayView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                         .lineLimit(1)
                 }
-                Spacer(minLength: NoopMetrics.space2)
+                .frame(maxHeight: .infinity)
                 LiquidTube(
                     frac: (workout.strain ?? 0) / 100,
                     tint: StrandPalette.effortColor,
-                    height: 10,
+                    height: NoopMetrics.TodayWidget.progressHeight,
                     animated: false
                 )
+                libraryRow(
+                    String(localized: "Sessions logged"),
+                    "\(workouts.count)"
+                )
+                .frame(maxHeight: .infinity)
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
     }
 
@@ -2030,13 +2047,20 @@ struct LiquidTodayView: View {
         _ value: String,
         unit: String = "",
         caption: String = "",
-        tint: Color = StrandPalette.textPrimary
+        tint: Color = StrandPalette.textPrimary,
+        compact: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space1) {
             HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space1) {
                 Text(value)
-                    .font(StrandFont.number(NoopMetrics.TodayWidget.headlineNumberSize))
+                    .font(StrandFont.number(
+                        compact
+                            ? NoopMetrics.TodayWidget.compactHeadlineNumberSize
+                            : NoopMetrics.TodayWidget.headlineNumberSize
+                    ))
                     .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 if !unit.isEmpty {
                     Text(unit).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -2130,6 +2154,14 @@ struct LiquidTodayView: View {
 
     /// A focused single-value group backed entirely by a value Today already loaded. The compact form is
     /// the glanceable value; wide adds one existing contextual value without invoking another engine.
+    /// A single-value widget.
+    ///
+    /// The 1×1 footprint is a SQUARE, and a label with a number under it fills barely a third of it — the
+    /// rest read as a rendering fault rather than as design. So every focused metric gets three bands, the
+    /// way a small home-screen widget does: caption on top, value in the middle, and a fill band at the
+    /// bottom that carries real information. `fraction` draws the value against its own scale; `spark`
+    /// draws its recent history. A metric with neither still gets its detail row promoted into the band
+    /// rather than leaving the square half empty.
     private func focusedMetricGroup(
         _ section: TodaySection,
         value: String,
@@ -2138,21 +2170,62 @@ struct LiquidTodayView: View {
         tint: Color,
         detailLabel: String,
         detailValue: String,
+        fraction: Double? = nil,
+        spark: [Double] = [],
         resizeContext: TodayGroupResizeContext
     ) -> some View {
         let compact = libraryIsCompact(section, resizeContext)
         return libraryGroup(section, trailing: dayTitle, resizeContext: resizeContext) {
             VStack(alignment: .leading, spacing: NoopMetrics.TodayWidget.contentSpacing) {
-                libraryStat(
-                    value,
-                    unit: unit,
-                    caption: compact ? "" : caption,
-                    tint: tint
+                // The caption stays at 1×1 too — a bare number with no label is unreadable once the
+                // widget is one of a dozen on the canvas.
+                libraryStat(value, unit: unit, caption: caption, tint: tint, compact: compact)
+                librarySmallFill(
+                    fraction: fraction,
+                    spark: spark,
+                    tint: tint,
+                    fallbackLabel: compact ? "" : detailLabel,
+                    fallbackValue: compact ? detailValue : ""
                 )
                 if !compact {
                     libraryRow(detailLabel, detailValue)
                 }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    /// The bottom band of a single-value widget. Prefers a real visual; falls back to the detail value so
+    /// a 1×1 always has three bands of content instead of a number floating in an empty square.
+    @ViewBuilder
+    private func librarySmallFill(
+        fraction: Double?,
+        spark: [Double],
+        tint: Color,
+        fallbackLabel: String,
+        fallbackValue: String
+    ) -> some View {
+        if spark.count >= 2 {
+            // The same Sparkline the detailed Key-Metric tiles draw, so a metric's history reads
+            // identically wherever it appears.
+            Sparkline(values: spark, gradient: Gradient(colors: [tint.opacity(0.5), tint]))
+                .frame(height: NoopMetrics.TodayWidget.compactVesselSize)
+                .accessibilityHidden(true)
+        } else if let fraction {
+            LiquidTube(
+                frac: min(1, max(0, fraction)),
+                tint: tint,
+                height: NoopMetrics.TodayWidget.progressHeight,
+                animated: false
+            )
+        } else if !fallbackValue.isEmpty {
+            Text(fallbackValue)
+                .font(StrandFont.number(NoopMetrics.TodayWidget.rowNumberSize))
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        } else if !fallbackLabel.isEmpty {
+            EmptyView()
         }
     }
 
@@ -2170,10 +2243,28 @@ struct LiquidTodayView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.TodayWidget.contentSpacing) {
                 libraryStat(
                     night?.totalSleepMin.map { hmText($0) } ?? "—",
-                    caption: compact ? "" : String(localized: "Time asleep"),
-                    tint: StrandPalette.restColor
+                    caption: String(localized: "Time asleep"),
+                    tint: StrandPalette.restColor,
+                    compact: compact
                 )
-                if !compact {
+                // The 1×1 keeps a fill band rather than a bare duration in an empty square: efficiency is
+                // the natural second reading of a night, and it already has a 0–100 scale to draw against.
+                if compact {
+                    LiquidTube(
+                        frac: (night?.efficiencyPct ?? 0) / 100,
+                        tint: StrandPalette.restColor,
+                        height: NoopMetrics.TodayWidget.progressHeight,
+                        animated: false
+                    )
+                    Text(
+                        night?.efficiencyPct.map { "\(Int($0.rounded()))% efficient" }
+                            ?? String(localized: "No efficiency yet")
+                    )
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                } else {
                     libraryRow(
                         String(localized: "Efficiency"),
                         night?.efficiencyPct.map { "\(Int($0.rounded()))%" } ?? "—"
@@ -2184,6 +2275,7 @@ struct LiquidTodayView: View {
                     )
                 }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
     }
 
@@ -2334,6 +2426,9 @@ struct LiquidTodayView: View {
             tint: StrandPalette.restColor,
             detailLabel: String(localized: "Time asleep"),
             detailValue: sleepSnapshot?.totalSleepMin.map(hmText) ?? "—",
+            // Deep sleep only means something against its own recent nights, and the series is already
+            // banked for the Key-Metric tiles — so the fill band costs nothing to populate.
+            spark: windowedSpark("deep_sleep"),
             resizeContext: resizeContext
         )
     }
@@ -2772,15 +2867,28 @@ struct LiquidTodayView: View {
                 libraryStat(
                     String(format: "%.1f", HydrationGoal.litres(fromML: hydrationML)),
                     unit: "L",
-                    caption: compact
-                        ? ""
-                        : (selectedDayOffset == 0
-                            ? String(localized: "Logged today")
-                            : String(localized: "Logged on this day")),
-                    tint: StrandPalette.metricCyan
+                    // The caption stays at 1×1. Dropping it left a bare "1.2 L" with nothing to say what
+                    // it was, in a square that was already two-thirds empty.
+                    caption: selectedDayOffset == 0
+                        ? String(localized: "Logged today")
+                        : String(localized: "Logged on this day"),
+                    tint: StrandPalette.metricCyan,
+                    compact: compact
                 )
-                LiquidTube(frac: fraction, tint: StrandPalette.metricCyan, height: 8, animated: false)
+                LiquidTube(
+                    frac: fraction,
+                    tint: StrandPalette.metricCyan,
+                    height: NoopMetrics.TodayWidget.progressHeight,
+                    animated: false
+                )
+                if !compact {
+                    libraryRow(
+                        String(localized: "Goal"),
+                        String(format: "%.1f L", HydrationGoal.litres(fromML: Double(goal)))
+                    )
+                }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
     }
 

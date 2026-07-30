@@ -185,6 +185,8 @@ enum TodayWidgetFootprint {
         let rowUnit = max(1, (canvasWidth - horizontalSpacing) / 2)
         switch size {
         case .small, .wide:
+            // One row unit. Both footprints are ONE row tall so every widget on the canvas lines up —
+            // that unification is the point, and content is what adapts to it, never the other way round.
             return rowUnit
         case .large:
             return rowUnit * 2 + verticalSpacing
