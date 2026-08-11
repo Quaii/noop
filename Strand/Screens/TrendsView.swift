@@ -269,13 +269,17 @@ struct TrendsView: View {
     }
 
     private var scaffold: some View {
-        ScreenScaffold(title: "Trends", subtitle: "The thread of you over time.",
-                       // PERF (scroll): lazy column — byte-identical layout (LazyVStack == eager VStack
-                       // alignment/spacing/header). The content is one inner eager VStack, so the staggered
-                       // section reveal is unchanged; this only defers building that stack until it scrolls in.
-                       onRefresh: { await repo.refresh() },
-                       lazy: true,
-                       topBackground: liquidScaffoldSky()) {
+        ScreenScaffold(
+            title: "Trends",
+            subtitle: "The thread of you over time.",
+            // PERF (scroll): lazy column — byte-identical layout (LazyVStack == eager VStack
+            // alignment/spacing/header). The content is one inner eager VStack, so the staggered
+            // section reveal is unchanged; this only defers building that stack until it scrolls in.
+            onRefresh: { await repo.refresh() },
+            lazy: true,
+            topBackground: liquidScaffoldSky(),
+            trailing: { shareRecapButton }
+        ) {
             if repo.days.isEmpty {
                 ComingSoon(what: repo.loaded
                     ? "Trends need history to draw. Import your WHOOP export in Data Sources to see weeks, months and years instantly."
@@ -295,13 +299,17 @@ struct TrendsView: View {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                     // The main card list ripples in once on appear (Reduce-Motion safe).
                     Group {
-                        // Week-in-review digest (#208) with prev/next week browsing (#710) — self-hides
-                        // only when NO week in history has data. Past weeks render in the same format.
-                        weeklyDigestNav
-                            .staggeredAppear(index: 0)
-                        // The Charge / Effort / Rest trio, presented in NOOP's pip language.
-                        weekInReview(charge: recovery, effort: strain, rest: rest)
-                            .staggeredAppear(index: 1)
+                        // These two weekly summaries are one visual group. Keep their card-to-card gap
+                        // compact, then return to the larger section spacing for the trend charts below.
+                        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                            // Week-in-review digest (#208) with prev/next week browsing (#710) — self-hides
+                            // only when NO week in history has data. Past weeks render in the same format.
+                            weeklyDigestNav
+                                .staggeredAppear(index: 0)
+                            // The Charge / Effort / Rest trio, presented in NOOP's pip language.
+                            weekInReview(charge: recovery, effort: strain, rest: rest)
+                                .staggeredAppear(index: 1)
+                        }
                         rangeBar(recovery: recovery)
                             .staggeredAppear(index: 2)
                         heroRecovery(recovery: recovery)
@@ -361,6 +369,45 @@ struct TrendsView: View {
         WeeklyDigestEngine.addDays(Repository.localDayKey(Date()), weekOffset * 7)
     }
 
+    /// The selected week's digest is shared by the recap card and its compact header action so both
+    /// always export the same week while the user steps backward and forward through history.
+    private var selectedWeekDigest: WeeklyDigest {
+        WeeklyDigestSource.digest(from: repo.days, anchorDay: weekAnchorDay)
+    }
+
+    /// A compact, icon-only share action in the screen header. The localized label remains available
+    /// to VoiceOver and pointer help while the visible control stays square and out of the recap flow.
+    @ViewBuilder
+    private var shareRecapButton: some View {
+        let digest = selectedWeekDigest
+        if !digest.isEmpty {
+            Button { shareRecap(digest) } label: {
+                Label("Share recap", systemImage: "square.and.arrow.up")
+                    .labelStyle(.iconOnly)
+                    .font(StrandFont.headline.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .frame(width: NoopButtonMetrics.minHitTarget,
+                           height: NoopButtonMetrics.minHitTarget)
+                    .background(NoopPanelSurface(cornerRadius: NoopButtonMetrics.cornerRadius))
+                    .contentShape(RoundedRectangle(cornerRadius: NoopButtonMetrics.cornerRadius,
+                                                   style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Share recap")
+            .help("Share recap")
+        }
+    }
+
+    /// Render the selected recap off-screen and hand the PNG to the platform share sheet / Save panel.
+    private func shareRecap(_ digest: WeeklyDigest) {
+        let page = WeeklyDigestContent(digest: digest, compact: true, showsHeader: true)
+            .frame(width: 380)
+            .padding(24)
+            .background(StrandPalette.surfaceBase)
+            .environment(\.colorScheme, colorScheme)
+        TrendsReportRenderer.exportPNG(page: page, suggestedName: "noop-recap-\(weekAnchorDay).png")
+    }
+
     /// Move the digest one week earlier (-1) or later (+1), clamped to [minWeekOffset, 0] — never into a
     /// future week, never past the earliest week we hold.
     private func stepWeek(_ delta: Int) {
@@ -374,7 +421,7 @@ struct TrendsView: View {
     /// self-hides only when there's no data in ANY week (an all-empty history), matching the old card.
     @ViewBuilder
     private var weeklyDigestNav: some View {
-        let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: weekAnchorDay)
+        let digest = selectedWeekDigest
         // Only hide the navigation entirely when the WHOLE history is empty — an empty PAST week still
         // shows the header + chevrons so the user can step to a week that does hold data.
         if repo.days.isEmpty {
@@ -390,17 +437,6 @@ struct TrendsView: View {
                 } else {
                     WeeklyDigestContent(digest: digest, compact: true, showsHeader: false)
                         .padding(.top, NoopMetrics.space1)
-                    // Share this week's recap as an image. Renders the digest card (with its header) to a
-                    // PNG off-screen and hands it to the share sheet / Save panel — reuses TrendsReport's
-                    // ImageRenderer path. Only offered when the week actually holds data.
-                    NoopButton("Share recap", systemImage: "square.and.arrow.up", kind: .secondary) {
-                        let page = WeeklyDigestContent(digest: digest, compact: true, showsHeader: true)
-                            .frame(width: 380)
-                            .padding(24)
-                            .background(StrandPalette.surfaceBase)
-                            .environment(\.colorScheme, colorScheme)
-                        TrendsReportRenderer.exportPNG(page: page, suggestedName: "noop-recap-\(weekAnchorDay).png")
-                    }
                 }
             }
         }
